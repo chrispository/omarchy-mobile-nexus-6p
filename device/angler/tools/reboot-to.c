@@ -8,7 +8,8 @@
 //
 //   reboot-to bootloader | recovery | normal
 //
-// The only thing it writes is the restart-reason word. Angler-specific.
+// The only thing it writes is the restart-reason word. Under systemd it then
+// runs "systemctl reboot"; elsewhere it restarts at once. Angler-specific.
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -53,6 +54,11 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	sync();
+	/* Under systemd, shut down cleanly: it restarts the same way (PS_HOLD) */
+	if (!access("/run/systemd/system", F_OK)) {
+		execl("/usr/bin/systemctl", "systemctl", "reboot", (char *)NULL);
+		perror("reboot-to: systemctl");
+	}
 	reboot(RB_AUTOBOOT);
 	perror("reboot-to: reboot");
 	return 1;

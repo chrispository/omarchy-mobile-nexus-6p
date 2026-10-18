@@ -18,7 +18,7 @@ WORK="${WORK:-$HOME/android}"
 KERNEL_DIR="${KERNEL_DIR:-$WORK/mainline/linux-angler}"
 KERNEL_OUT="${KERNEL_OUT:-$WORK/mainline/out-angler-boot}"
 BOARD_ID="${BOARD_ID:-0x1f57}"
-CMDLINE="${CMDLINE:-maxcpus=4 panic=10 clk_ignore_unused pd_ignore_unused loglevel=7 console=tty0 fbcon=font:TER16x32 consoleblank=0 rdinit=/init}"
+CMDLINE="${CMDLINE:-maxcpus=4 panic=10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused loglevel=7 console=tty0 fbcon=font:TER16x32 consoleblank=0 rdinit=/init}"
 IMAGE=angler-build:24.04
 DTB=qcom/msm8994-huawei-angler-rev-101.dtb
 # The bootloader unpacks the kernel at 0x8000 and puts the DTB at 0x01e00000:

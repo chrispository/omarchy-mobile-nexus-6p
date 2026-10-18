@@ -136,10 +136,17 @@ switch_to_root() {
   for i in $(seq 1 10); do [ -b /dev/by-name/userdata ] && break; sleep 1; done
   [ -b /dev/by-name/userdata ] || { say "root: no userdata partition"; return; }
   [ -e /run/emmc-ro-failed ] && { say "root: storage guard failed, staying in RAM"; return; }
-  # Every partition must be guarded before anything runs from the eMMC
-  for s in /sys/class/block/mmcblk*p*; do
-    [ -e "/run/emmc-ro/${s##*/}" ] || { say "root: ${s##*/} not guarded yet"; return; }
+  # Every partition must be guarded before anything runs from the eMMC; the
+  # guard's first pass takes several seconds
+  for i in $(seq 1 30); do
+    unguarded=""
+    for s in /sys/class/block/mmcblk*p*; do
+      [ -e "/run/emmc-ro/${s##*/}" ] || unguarded=${s##*/}
+    done
+    [ -z "$unguarded" ] && break
+    sleep 1
   done
+  [ -z "$unguarded" ] || { say "root: $unguarded still not guarded"; return; }
   fsck.ext4 -p /dev/by-name/userdata >/dev/kmsg 2>&1
   [ $? -lt 4 ] || { say "root: fsck failed"; return; }
   mkdir -p /newroot

@@ -1,0 +1,12 @@
+#!/bin/bash
+# Wait (up to 6 min) for the phone to come up in Arch with systemd settled
+# Desktop side (nexus_linux_plan.md): run from the repository.
+S="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=3 root@172.16.42.1"
+t0=$(date +%s)
+while (( $(date +%s) - t0 < 360 )); do
+  st=$($S 'if [ -d /run/systemd/system ]; then systemctl is-system-running; else echo ramroot; fi' 2>/dev/null)
+  case $st in running|degraded) echo "arch $st after $(( $(date +%s)-t0 ))s"; exit 0 ;; esac
+  [[ $st == ramroot ]] && (( $(date +%s) - t0 > 120 )) && { echo "still in the RAM root after 2 min"; exit 2; }
+  sleep 5
+done
+echo "no settled Arch after 6 min (last: ${st:-no ssh})"; exit 1

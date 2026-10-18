@@ -1,0 +1,10 @@
+#!/bin/bash
+# Keep a reverse SOCKS proxy to the phone: 127.0.0.1:1080 on the phone goes out
+# Desktop side (nexus_linux_plan.md): run from the repository.
+# through this desktop. Also keeps the phone's clock in step.
+while :; do
+  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+      -o ConnectTimeout=3 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -o ExitOnForwardFailure=yes \
+      -R 127.0.0.1:1080 root@172.16.42.1 "date -u -s @$(date +%s) >/dev/null 2>&1; exec sleep infinity" 2>/dev/null
+  sleep 5
+done

@@ -1,0 +1,14 @@
+#!/bin/bash
+# Reboot the phone into fastboot from Linux, fastboot-boot an image, wait for SSH
+# Desktop side (nexus_linux_plan.md): run from the repository.
+img=$1
+S="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=2 root@172.16.42.1"
+if ! fastboot devices | grep -q fastboot; then
+  $S 'nohup sh -c "sleep 1; reboot-to bootloader" >/dev/null 2>&1 </dev/null &' || { echo "no ssh"; exit 1; }
+  for i in $(seq 1 60); do sleep 2; fastboot devices | grep -q fastboot && break; done
+fi
+fastboot devices | grep -q fastboot || { echo "no fastboot"; exit 1; }
+fastboot boot "$img" 2>&1 | tail -1
+t0=$(date +%s)
+for i in $(seq 1 90); do $S true 2>/dev/null && { echo "ssh after $(( $(date +%s)-t0 ))s"; exit 0; }; sleep 2; done
+echo "no ssh after $(( $(date +%s)-t0 ))s"; exit 1

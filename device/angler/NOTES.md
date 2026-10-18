@@ -31,6 +31,28 @@ angler-03.78), with the reason for each. Plan and results:
   reach its `sysrq c` at once). Stop them before switching; only builtins and
   already-running binaries (fbkick, watchdog) are safe after it.
 
+## Storage, input, userspace
+
+- **The eMMC is `mmcblk1`** (sdhci-msm, HS400 works). Find partitions by
+  `PARTNAME` (`/dev/by-name/` from the initramfs), never by number.
+- **Never set the whole eMMC disk read-only:** partitions inherit it, so
+  userdata (the root) goes read-only too. Guard partitions one by one and
+  remove the whole-disk node instead.
+- **BAM DMA (`f9904000`, `f9944000`) fails to probe (-22),** and every QUP
+  that lists `dmas` defers forever, silently (empty `i2c_qup` errors). The
+  touch bus drops its `dmas`; QUP falls back to PIO.
+- **Touch is a Synaptics S3718AR (RMI4, F12)** at 0x70 on BLSP1 QUP2: IRQ
+  GPIO 77, reset GPIO 96, bus switch GPIO 38, L22 and L30 (kernel branch
+  `omamobile-angler`, exported in `kernel-patches/`). The PM8994 regulators
+  come from Petr Vorel's postmarketOS patch.
+- **pacman 7 needs Landlock** for its download sandbox
+  (`CONFIG_SECURITY_LANDLOCK`, `LSM` includes `landlock`).
+- **Internet for the phone without sudo on the desktop:** keep
+  `ssh -R 127.0.0.1:1080 root@172.16.42.1` open, and use
+  `all_proxy=socks5h://127.0.0.1:1080` on the phone
+  (`/etc/profile.d/omamobile-proxy.sh`). There's no RTC: set the clock from
+  the desktop (`date -u -s @$(date +%s)`).
+
 ## Display (MDSS 1.9, dual-DSI command-mode panel)
 
 - **The MDP is at MDSS + 0x1000** (`0xfd901000`), not + 0x100 as on 8974.
@@ -61,5 +83,8 @@ angler-03.78), with the reason for each. Plan and results:
   never byte-wise `memcpy` of 3-byte pixels.
 - **Map enough of MDSS:** VIG1 is at `+0x7000`. A short mapping silently read
   0 before it faulted.
+- **simpledrm runs on the same buffer** (`/dev/dri/card0`, native RGB888,
+  XRGB8888 emulated) and fbkick keeps pushing frames: a KMS device for
+  Hyprland until the msm driver drives the panel.
 - **`/dev/mem` works for this:** `STRICT_DEVMEM=y` without `IO_STRICT_DEVMEM`
   allows unclaimed MMIO and no-map memory. `tools/peek` is a read-only reader.
