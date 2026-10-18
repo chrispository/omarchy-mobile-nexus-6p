@@ -17,6 +17,7 @@ while IFS= read -r -d '' file; do
   install -d "$destination/usr/lib/$(dirname "${file#vendor/}")"
   ln -sfn "$(readlink "$file")" "$destination/usr/lib/${file#vendor/}"
 done < <(find vendor -type l -print0)
+for file in setup-user.d/*; do install -Dm755 "$file" "$destination/usr/lib/omamobile/setup-user.d/${file##*/}"; done
 install -Dm644 etc/10-omamobile-angler-ssh.conf "$destination/etc/ssh/sshd_config.d/10-omamobile-angler.conf"
 install -Dm644 etc/omamobile-proxy.sh "$destination/etc/profile.d/omamobile-proxy.sh"
 install -Dm644 etc/50-omamobile-angler.conf "$destination/etc/UPower/UPower.conf.d/50-omamobile-angler.conf"

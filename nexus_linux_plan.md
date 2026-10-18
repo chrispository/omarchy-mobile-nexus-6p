@@ -485,3 +485,107 @@ image, so the phone comes back to Linux with SSH.
 - pstore was empty after the forced restart (no ramoops region yet).
 - SDDM stays disabled until the owner wants the session back; the "hang"
   that disabled it is explained.
+
+### 2026-10-18 (afternoon): why the session is slow (7.3.0-rc7-angler+)
+
+Measured on the phone with the session up, `perf` and `strace` from Arch
+(the kernel has no ftrace):
+
+- **CPU:** four A53s (CPU0-3) at about **770 MHz**: 7.9 G cycles in 10.3 s
+  for a single-threaded loop, and 9.1 G cycles per 12.1 s of busy CPU time
+  system-wide. No cpufreq driver, so they stay at the bootloader's rate
+  (the A53 maximum is 1.55 GHz); the A57s are off by default (four cores).
+- **Rendering is software only:** aquamarine finds no render node
+  (`CDRMRenderer(drm): Can't create renderer, no matching devices found`),
+  so Hyprland draws with llvmpipe onto simpledrm (`simple-framebuffer`,
+  1440x2560, scale 3.2). 80% of all samples are llvmpipe JIT code in
+  Hyprland, and its four `llvmpipe-N` threads hold all four cores.
+- **About 1 fps:** one `DRM_IOCTL_MODE_ATOMIC` every 0.8-1.4 s, at **about
+  3.7 core-seconds per frame** (about 750 cycles per screen pixel). The hot
+  loop is llvmpipe's bilinear texture fetch (`fdiv` 1/w, lane-wise `ld1`
+  gathers, samples land after the loads: memory stalls).
+  `render:cm_enabled = false` changed nothing (3.78 → 3.69 core-s/frame).
+- **It never stops drawing:** with no windows at all, only the shell's
+  layers, Hyprland still committed a frame about every 830 ms, and
+  quickshell (also llvmpipe) used 0.6-0.9 cores even when covered by a
+  fullscreen window. Omarchy's screensaver (`ttfx --frame-rate 120` in a
+  fullscreen foot) adds a full-screen animation.
+- **Memory, quiet system:** `perf bench mem memcpy` 1.62 GB/s (32 MB) and
+  3.2 GB/s (16 KB); under the session's load 0.8 GB/s.
+
+Order of fixes, by gain for the work: the GPU (Adreno 430, freedreno, an
+msm render node next to simpledrm) is the only one that makes the session
+smooth; stopping the idle redraws and the screensaver makes it usable and
+quiet; the A57s (about 1.7x) and cpufreq to 1.55 GHz (about 2x) help, but
+software rendering at this resolution stays at a few fps with both.
+
+### 2026-10-18 (afternoon): first fixes, and where the next session starts
+
+- **Screensaver off:** device-angler **0.1.9** ships
+  `/usr/lib/omamobile/setup-user.d/50-angler`, which turns on Omarchy's
+  `screensaver-off` toggle once. omamobile-shell **0.2.8**'s
+  `omamobile-setup-user` now runs every executable in
+  `/usr/lib/omamobile/setup-user.d/` (device packages' once-only user
+  steps). Both are installed on the phone, and the toggle is set for the user.
+- **The shell never stops redrawing (not fixed yet):** all seven
+  quickshell surfaces (wallpaper, bar, home, dock, notifications, lock,
+  quick settings) commit a full-damage frame each time Hyprland renders
+  (decoded from `strace -e sendmsg,recvmsg` on quickshell: only frame
+  callbacks and buffer releases arrive, no configure or scale events, so
+  the shell redraws on its own). The GUI thread is nearly idle (62 samples
+  in 5 s); the work is llvmpipe in the eight `QSGRenderThread`s. Every
+  window redrawing together points to a running Qt animation (Qt's render
+  loop repaints all windows while any animation runs, even in a hidden
+  item), not to one widget's timer. Candidates read so far (all
+  conditional): `Ui/Button.qml` spinner, `omamobile.quicksettings`
+  `GlyphButton` spinner, the media bar widget's scroll, the power panel's
+  charging pulse, `omamobile.fingerprint`'s waiting pulse, and OWL's 30 fps
+  frame clock (`omamobile.home/owl/OwlScheduler.qml`, runs while a shown
+  widget animates). **Next step:** with the phone unlocked (the shell is
+  the locker, so never restart it while locked), restart it with
+  `QT_LOGGING_RULES="qt.scenegraph.renderloop=true;qt.scenegraph.time.renderloop=true"`
+  and see which windows get update requests, then bisect the candidates.
+- **DPMS off stops all rendering** (a real CPU and battery saving), but
+  there's no backlight device, so the panel shows a frozen picture with the
+  light on. Left as is. Follow-up: the PMI8994 WLED (`qcom,pmi8994-wled`,
+  mainline `leds-qcom-wled`/`qcom-wled`) in the DT, so DPMS off can darken it.
+- **Touch is rotated 180°:** temporarily fixed in the user's
+  `~/.config/hypr/input.lua`
+  (`hl.config({ input = { touchdevice = { transform = 2 } } })`). The
+  permanent fix is `touchscreen-inverted-x` and `touchscreen-inverted-y` on
+  the rmi4 F12 node in the angler DTS, then drop the Hyprland line. Needs a
+  kernel build and a `boot` flash (ask first).
+- device-angler **0.1.8** (watchdog steps aside when the initramfs's busybox
+  feeder holds the device) is committed.
+
+**GPU plan (next big step), from the kernel tree (`linux-angler`, 7.3-rc7):**
+drm/msm already knows the Adreno 430 (`a4xx_catalog.c`, chip id
+`0x04030002`, firmware `a420_pm4.fw`/`a420_pfp.fw` from linux-firmware), and
+`msm.separate_gpu_kms=1` gives a GPU-only render node next to simpledrm
+(Hyprland then renders on the GPU and copies to the simpledrm buffer). Missing:
+
+1. A GPU node in `msm8994.dtsi` (`qcom,adreno-430.2`, `qcom,adreno`): registers (expected
+   `0xfdb00000`, to be confirmed), its IRQ, the clocks and the GDSC (`OXILI_GDSC`) from
+   `mmcc-msm8994` (already in the DTS), an OPP table. Take these from
+   Google's angler kernel (`~/android/reference/angler/kernel-src`) and
+   check them against the downstream DT.
+2. The GPU's IOMMU (a v1 SMMU on msm8994; check whether `qcom_iommu` or
+   `arm-smmu` with `qcom,msm8994` matches, or run without IOMMU first via
+   the VRAM carveout: `msm.vram=` with no `iommus`).
+3. `mmcc_msm8994` is blacklisted today (it could gate the bootloader's
+   display clocks, see NOTES). The GPU needs it, so the blacklist must give
+   way to `clk_ignore_unused`/protected display clocks first. This is the
+   risky step: if the display goes dark, SSH still works.
+4. Mesa on the phone: Arch's `mesa` includes freedreno; check `a430` in
+   `eglinfo` once `/dev/dri/renderD128` exists.
+
+Start read-only: dump the downstream GPU DT nodes, and the clock and GDSC
+state, before booting anything (one-shot `fastboot boot` tests are
+pre-approved; flashing `boot` needs the owner's go).
+
+**Phone state at handoff:** `boot` holds `angler-n1.img` (Arch, charger,
+four A53 cores); the graphical session is up and the user `chris`
+is logged in, with the PIN they set. Charging about 150 mA. Background helpers
+on the desktop: `/tmp/angler-proxy` (the phone's internet) and
+`/tmp/angler-vbat-log` (battery log in `/tmp/angler-vbat.log`); both stop
+with the session, so restart the proxy for pacman.

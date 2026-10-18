@@ -108,8 +108,24 @@ angler-03.78), with the reason for each. Plan and results:
   as the user, from a container with `--device /dev/ttyACM0`).
 - **The phone serves the desktop's address on usb0** (networkd DHCP server),
   so ufw must allow 67/udp there (`omamobile-usb-firewall.service`).
-- **Omarchy's idle handling turns DPMS off,** and simpledrm blanks the panel
-  then. `hyprctl dispatch 'hl.dsp.dpms({ action = "enable" })'` lights it.
+- **Omarchy's idle handling turns DPMS off:** Hyprland stops drawing, but
+  there's no backlight device yet, so the panel keeps showing the last frame
+  with the light on, and `grim` blocks waiting for a frame.
+  `hyprctl dispatch 'hl.dsp.dpms({ action = "enable" })'` brings it back.
+- **The touchscreen reports both axes flipped** (a top-left tap reads about
+  (1317, 2444) of 1439x2559). Until the DT says `touchscreen-inverted-x/y`,
+  the user's Hyprland config sets `input.touchdevice.transform = 2`.
+- **Everything is drawn in software** (llvmpipe on simpledrm; four A53s at
+  about 770 MHz with no cpufreq): about 1 fps at about 3.7 core-seconds per
+  frame, and the Omarchy shell redraws all its windows nonstop. Measure with
+  `perf` (installed on the phone; the kernel has no ftrace) and count
+  `DRM_IOCTL_MODE_ATOMIC` with `strace` on Hyprland. Never `SIGSTOP`
+  Hyprland or quickshell to get a quiet benchmark while the owner is using
+  the phone: the screen freezes. And never restart the shell while it holds
+  the lock.
+- **Device packages add once-only user steps** in
+  `/usr/lib/omamobile/setup-user.d/` (omamobile-shell 0.2.8+); angler's
+  turns Omarchy's screensaver off.
 
 ## Display (MDSS 1.9, dual-DSI command-mode panel)
 

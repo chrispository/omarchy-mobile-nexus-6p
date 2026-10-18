@@ -7,7 +7,7 @@ fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
-for script in bin/* build install; do bash -n "$script" || fail "$script parses"; done
+for script in bin/* setup-user.d/* build install; do bash -n "$script" || fail "$script parses"; done
 pass "scripts parse"
 
 ./build "$tmp/build" || fail "C tools compile"
@@ -33,10 +33,15 @@ for f in usr/bin/reboot-to usr/bin/fbkick usr/bin/omamobile-boot-ok \
          usr/lib/systemd/network/20-usb-gadget.network \
          usr/lib/NetworkManager/conf.d/10-omamobile-usb.conf \
          etc/ssh/sshd_config.d/10-omamobile-angler.conf \
-         etc/UPower/UPower.conf.d/50-omamobile-angler.conf; do
+         etc/UPower/UPower.conf.d/50-omamobile-angler.conf \
+         usr/lib/omamobile/setup-user.d/50-angler; do
   [[ -e $tmp/dest/$f ]] || fail "installs $f"
 done
+[[ -x $tmp/dest/usr/lib/omamobile/setup-user.d/50-angler ]] || fail "setup step is executable"
 pass "install layout"
+
+grep -c "omarchy-toggle screensaver-off on" setup-user.d/50-angler >/dev/null || fail "screensaver off by default"
+pass "screensaver off by default"
 
 # The display runs on the bootloader's MDSS state: its clock driver stays out
 grep -qx 'blacklist mmcc_msm8994' vendor/modprobe.d/omamobile-angler.conf || fail "mmcc-msm8994 blacklisted"

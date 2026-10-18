@@ -1,0 +1,12 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Nexus 6P user defaults, run once each by omamobile-setup-user.
+set -euo pipefail
+
+# With no GPU yet, llvmpipe draws the 1440x2560 screen at about one frame a
+# second, and Omarchy's screensaver (a fullscreen terminal animation at 120
+# fps) holds all four cores (nexus_linux_plan.md, 2026-10-18 afternoon).
+# Omarchy's own toggle; omarchy-toggle-screensaver brings it back.
+if omarchy-done ensure omamobile-angler-screensaver-off; then
+  omarchy-toggle screensaver-off on
+fi

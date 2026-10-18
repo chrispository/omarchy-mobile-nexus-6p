@@ -260,3 +260,11 @@ if omarchy-done ensure omamobile-lock-after-screensaver; then
   mkdir -p ~/.local/state/omarchy/toggles
   touch ~/.local/state/omarchy/toggles/lock-after-screensaver
 fi
+
+# Device packages add their own once-only steps here (a phone that draws in
+# software turns the animated screensaver off, for example). Each runs as the
+# user and uses omarchy-done markers like the steps above.
+for step in /usr/lib/omamobile/setup-user.d/*; do
+  [[ -x $step ]] || continue
+  "$step" || echo "omamobile-setup-user: $step failed" >&2
+done
