@@ -1,0 +1,69 @@
+From d2d24325877293a05c45b79d4ec422854d2962ab Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 05:28:10 -0600
+Subject: [PATCH 11/11] arm64: dts: qcom: msm8994-huawei-angler: Enable the
+ charger and fuel gauge
+
+The Nexus 6P charges its 3450 mAh battery through the PMI8994's SMBCHG and
+measures it with the PMI8994 fuel gauge. Describe the battery with limits
+below Google's kernel (4.40 V float, 3.2 A with an SMB1351 parallel charger,
+huawei_msm8994_angler_vn2/huawei-battery.dtsi in
+android-msm-angler-3.10-oreo-mr1): 4.35 V and 1.5 A for the SMBCHG alone.
+---
+ .../qcom/msm8994-huawei-angler-rev-101.dts    | 26 +++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts b/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts
+index 2d75d9104..d5980dd08 100644
+--- a/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts
++++ b/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts
+@@ -11,16 +11,32 @@
+ #include <dt-bindings/interrupt-controller/irq.h>
+ #include "msm8994.dtsi"
+ #include "pm8994.dtsi"
++#include "pmi8994.dtsi"
+ 
+ / {
+ 	model = "Huawei Nexus 6P";
+ 	compatible = "huawei,angler", "qcom,msm8994";
+ 	chassis-type = "handset";
++
+ 	/* required for bootloader to select correct board */
+ 	qcom,msm-id = <207 0x20000>;
+ 	qcom,pmic-id = <0x10009 0x1000a 0x0 0x0>;
+ 	qcom,board-id = <8026 0>;
+ 
++	/*
++	 * 3450 mAh Li-ion. Google's kernel charged it to 4.40 V at up to
++	 * 3.2 A with an SMB1351 parallel charger (huawei-battery.dtsi); these
++	 * limits stay below that, for the SMBCHG alone and an old cell.
++	 */
++	battery: battery {
++		compatible = "simple-battery";
++		charge-full-design-microamp-hours = <3450000>;
++		voltage-min-design-microvolt = <3400000>;
++		voltage-max-design-microvolt = <4350000>;
++		constant-charge-current-max-microamp = <1500000>;
++		charge-term-current-microamp = <150000>;
++	};
++
+ 	aliases {
+ 		serial0 = &blsp1_uart2;
+ 	};
+@@ -409,3 +425,13 @@ &sdhc1 {
+ 	status = "okay";
+ 	mmc-hs400-1_8v;
+ };
++
++&pmi8994_fg {
++	monitored-battery = <&battery>;
++	status = "okay";
++};
++
++&pmi8994_smbchg {
++	monitored-battery = <&battery>;
++	status = "okay";
++};
+-- 
+2.56.0
+

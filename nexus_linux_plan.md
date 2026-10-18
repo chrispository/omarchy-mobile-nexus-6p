@@ -346,3 +346,20 @@ from Linux; after a hang, hold Power about 20 s, then Volume Down + Power).
 Rollback for every step is a long Power press; `boot` keeps the known-good
 image, so the phone comes back to Linux with SSH.
 
+### 2026-10-18 (morning): battery ran flat; charger and fuel gauge built
+
+- **The battery drained under the Omarchy session.** One A53 pegged by
+  software rendering plus a full-white AMOLED drew more than the desktop's USB
+  port supplies with only the bootloader's charger settings. `vph_pwr` (PM8994
+  ADC channel 7) read 3.06 V, rose slowly with the session stopped, then the
+  phone browned out at the next reboot. SDDM is disabled until charging is
+  under control (`systemctl enable sddm` turns the session back on).
+- **Charger and fuel gauge** (kernel branch `omamobile-angler`, built, not yet
+  run): the PMI8994 SMBCHG driver (Yassine Oudjana) and fuel gauge (Joel
+  Selvaraj) with their DT nodes, cherry-picked from the msm8996-mainline tree
+  (`msm8996-stable-6.19.y`, `-x` keeps the source commits), and a
+  `simple-battery` node: 3450 mAh, 4.35 V, 1.5 A, 150 mA termination, below
+  Google's 4.40 V and 3.2 A (that was with an SMB1351 parallel charger).
+- **Next:** with the battery recovered, boot the charger kernel with the
+  session off, read `/sys/class/power_supply/*`, and watch `vph_pwr` rise.
+
