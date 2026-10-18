@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MIT
+# The PMI8994 charger (qcom-smbchg) starts at a 100 mA input limit on a USB
+# data port. The gadget asks the host for 500 mA (MaxPower), which every USB 2
+# port supplies: take it, or the phone drains while plugged in.
+ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="qcom-smbchg-usb", ATTR{input_current_limit}="500000"

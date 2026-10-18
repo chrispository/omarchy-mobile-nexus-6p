@@ -363,3 +363,22 @@ image, so the phone comes back to Linux with SSH.
 - **Next:** with the battery recovered, boot the charger kernel with the
   session off, read `/sys/class/power_supply/*`, and watch `vph_pwr` rise.
 
+### 2026-10-18 (morning): charging works
+
+- **The PMI8994 charger and fuel gauge run.** After the battery recovered in
+  stock fastboot, `7.3.0-rc7-angler+` with the SMBCHG and FG modules reports
+  `qcom-battery` (status Charging, health Good, 29.0 °C) and
+  `qcom-smbchg-usb` (SDP). At 2.85 V it pre-charged (`Trickle`), then went to
+  `Fast`.
+- **The input limit was the problem:** on a USB data port the charger starts
+  at 100 mA, because the gadget's configuration asked the host for 2 mA (the
+  kernel default). With 500 mA (`input_current_limit`) the battery takes
+  about 200 mA while the phone idles, and the voltage climbs (3.02 to 3.21 V
+  in a few minutes). The initramfs now asks for 500 mA (`MaxPower`), and
+  omamobile-device-angler 0.1.3 sets the limit when the charger appears.
+- **The fuel gauge's capacity reads 1%** at that voltage, plausible for a
+  flat cell; its `Failed to register battery` message at probe needs a look.
+- **The DHCP pool of one address** was still offered to the gadget's previous
+  random host MAC, so the desktop got no address after a reboot. The gadget
+  now has fixed MACs, and the pool has 8 addresses.
+

@@ -86,7 +86,12 @@ echo "Omarchy Mobile" > $g/strings/0x409/manufacturer
 echo "Nexus 6P (N1)" > $g/strings/0x409/product
 echo "omamobile" > $g/strings/0x409/serialnumber
 echo "NCM + ACM" > $g/configs/c.1/strings/0x409/configuration
+echo 500 > $g/configs/c.1/MaxPower   # mA: lets the charger take 500 mA from a USB 2 port
 mkdir -p $g/functions/ncm.usb0 $g/functions/acm.GS0
+# Fixed, locally administered MACs: the desktop keeps one interface identity
+# across boots, so the phone's one-address DHCP pool always fits it
+echo 02:6e:36:70:00:01 > $g/functions/ncm.usb0/dev_addr
+echo 02:6e:36:70:00:02 > $g/functions/ncm.usb0/host_addr
 ln -s $g/functions/ncm.usb0 $g/configs/c.1/
 ln -s $g/functions/acm.GS0 $g/configs/c.1/
 

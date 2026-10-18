@@ -39,3 +39,6 @@ pass "install layout"
 # The display runs on the bootloader's MDSS state: its clock driver stays out
 grep -qx 'blacklist mmcc_msm8994' vendor/modprobe.d/omamobile-angler.conf || fail "mmcc-msm8994 blacklisted"
 pass "display clocks blacklisted"
+
+grep -c 'input_current_limit}="500000"' vendor/udev/rules.d/60-omamobile-charger.rules >/dev/null || fail "charger input limit rule"
+pass "charger input limit"

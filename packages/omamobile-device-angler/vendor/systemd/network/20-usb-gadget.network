@@ -9,6 +9,6 @@ DHCPServer=yes
 
 [DHCPServer]
 PoolOffset=2
-PoolSize=1
+PoolSize=8
 EmitDNS=no
 EmitRouter=no
