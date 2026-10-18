@@ -5,7 +5,12 @@
 # instead of leaving it stuck with no USB. The watchdog counts faster while
 # the CPUs are busy, so feed it every second at its default timeout (30 s
 # nominal); systemd's RuntimeWatchdogSec pings too rarely for that.
-exec 3>/dev/watchdog0
+# The initramfs's busybox feeder normally survives switch_root and keeps the
+# device open; then it is fed already, and this has nothing to do.
+if ! exec 3>/dev/watchdog0; then
+  echo "watchdog0 is held by another feeder: $(fuser /dev/watchdog /dev/watchdog0 2>/dev/null)"
+  exit 0
+fi
 trap 'printf V >&3; exit 0' TERM INT   # magic close: a clean stop disarms it
 while :; do
   printf . >&3
