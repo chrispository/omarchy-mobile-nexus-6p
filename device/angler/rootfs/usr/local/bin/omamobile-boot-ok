@@ -1,0 +1,7 @@
+#!/bin/sh
+# The initramfs wrote /.omamobile/pending before switching root. Remove it
+# once sshd has stayed up for 30 s, so the dead-man lets this boot stand and
+# the next boot switches to Arch again.
+sleep 30
+systemctl is-active -q sshd.service || { echo "sshd is not running; leaving the marker"; exit 1; }
+rm -f /.omamobile/pending && sync && echo "boot marked good"

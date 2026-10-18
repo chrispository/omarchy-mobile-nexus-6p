@@ -1,0 +1,6 @@
+# Storage guard after switch_root: every eMMC partition but userdata (the
+# root) stays read-only, as the initramfs left it, and so do the boot areas
+# (separate disks). Not the whole disk: a read-only disk makes userdata
+# read-only too. Never add Android partitions here without the owner's say-so.
+ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="mmcblk*", KERNEL!="*rpmb*", ENV{DEVTYPE}=="partition", ENV{PARTNAME}!="userdata", RUN+="/usr/bin/blockdev --setro /dev/%k"
+ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="mmcblk*boot*", RUN+="/usr/bin/blockdev --setro /dev/%k"

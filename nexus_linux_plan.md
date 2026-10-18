@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Nexus 6P Linux and Omarchy Mobile feasibility plan
 
-**Status (2026-10-18): N1 passes; N2a (text console) passes.** The test
-handset is unlocked and boots mainline Linux from RAM (`fastboot boot`) to an
-SSH shell over USB, on one CPU with no storage access, with a kernel console
-on the panel through the bootloader's framebuffer. See the results at the end. No device support is
+**Status (2026-10-18): N1 passes; N2a (text console) passes; N3a (Arch
+root on userdata) passes.** The test handset boots mainline Linux, switches to
+Arch Linux ARM on the userdata partition with systemd, and is reached over USB
+SSH, on one CPU, with a kernel console on the panel through the bootloader's
+framebuffer and every other eMMC partition read-only. See the results at the end. No device support is
 claimed. Proposed kernel branch: `omamobile-angler-boot`; proposed worktree:
 `~/android/mainline/wt-angler-boot`; proposed output:
 `~/android/mainline/out-angler-boot`. These are reserved names, not existing
@@ -248,6 +249,29 @@ human's approval. Unknown device details are a stop condition.
   messages still reach fbcon.
 - Next for N2: mainline MDSS/DSI with a panel driver for real DRM, then touch,
   then Adreno 430.
+
+### 2026-10-18: unattended loop, eMMC, N3a Arch root
+
+- **Layout now:** `boot` holds a known-good RAM-root image (N2 plus watchdog
+  and `reboot-to`, no eMMC driver), `recovery` holds TWRP 3.7.0_9-0 (sha256
+  `21e41c06…`, TeamWin GPG-verified). Stock Android's kernel is gone; system
+  and vendor are untouched.
+- **No buttons needed:** `reboot-to bootloader` (IMEM restart reason) reaches
+  fastboot from Linux, and a test image goes in with `fastboot boot`. A test
+  that crashes or hangs while busy resets into the known-good image.
+- **Watchdog:** the APSS watchdog counts at full speed only while the CPU is
+  busy. `-T 1` raced the feeder at boot and every such image was reset within
+  seconds (bootreason `watchdog_nonsec`); `-T 5`, fed every second, is stable.
+- **eMMC:** `sdhci-msm` with HS400 works: Samsung BGND3R, 29.1 GiB, 44
+  partitions, as `mmcblk1`. The guard sets every partition and boot area
+  read-only by `PARTNAME` except userdata, and removes the whole-disk node.
+  It must not set the whole disk read-only: that makes userdata read-only too.
+- **N3a: pass.** `7.3.0-rc7-angler+`. `install-arch-root --format` put the
+  signed Arch Linux ARM aarch64 tarball (sha256 `42a4eeaa…b319`) on userdata
+  (25 GB ext4) in 5 minutes over USB. The initramfs switches to it; systemd
+  reached `running` with no failed units in 1 min 23 s, sshd answers on
+  172.16.42.1, and `omamobile-boot-ok` cleared the dead-man marker. fbkick
+  and the watchdog feeder carry on from the initramfs.
 
 For each run, append the date, gate, kernel release
 (`uname -r`), kernel commit, DTB/image hashes, package versions, expected and

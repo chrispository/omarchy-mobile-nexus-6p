@@ -1,0 +1,11 @@
+[Unit]
+Description=Mark this Arch boot good for the angler initramfs dead-man
+Wants=sshd.service
+After=sshd.service systemd-networkd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/omamobile-boot-ok
+
+[Install]
+WantedBy=multi-user.target

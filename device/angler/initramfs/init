@@ -20,26 +20,51 @@ say() { echo "omamobile: $*" > /dev/kmsg; }
 # unless MDSS still holds the bootloader's splash setup.
 fbkick loop 10 &
 
-# --- eMMC safety: every mmcblk device is read-only, and nothing is mounted ---
-# The N1 kernel has no eMMC driver, so there should be nothing to guard. This
-# is the second line of defence for when the driver is enabled: every eMMC
-# disk, partition and boot area is set read-only as soon as it appears, and
-# the whole-disk node is removed. RPMB is left alone (never opened). Nothing
-# in this initramfs runs mdev or udev, so nothing else touches the disks.
-mkdir -p /run/emmc-ro
+# Unattended recovery: pet the APSS watchdog. If the kernel hangs, the
+# watchdog resets the phone into the image in the boot partition.
+# The APSS watchdog counts at full speed while the CPU is busy and crawls
+# while it idles (NOTES.md): -T 5 bites a busy hang after 5 s and an idle
+# one after roughly a quarter of an hour. -T 1 raced the feeder at boot.
+WDT_T=5
+if [ -c /dev/watchdog ]; then
+  watchdog -F -T "$WDT_T" -t 1 /dev/watchdog &
+  wd_pid=$!
+  say "watchdog armed (-T $WDT_T)"
+fi
+
+# --- eMMC safety: every eMMC partition but userdata is read-only ---
+# Each partition and boot area is set read-only as soon as it appears, except
+# the partitions named in EMMC_RW (by GPT name, PARTNAME), and the whole-disk
+# node is removed. RPMB is left alone (never opened). Nothing in
+# this initramfs runs mdev or udev, so nothing else touches the disks.
+# /dev/by-name/<PARTNAME> links make partitions easy to find.
+EMMC_RW="userdata"
+mkdir -p /run/emmc-ro /dev/by-name
 emmc_ro_pass() {
-  local s name
+  local s name part
   for s in /sys/block/mmcblk* /sys/block/mmcblk*/mmcblk*; do
     [ -r "$s/ro" ] || continue
     name=${s##*/}
     case $name in *rpmb*) continue ;; esac
     [ -e "/run/emmc-ro/$name" ] && continue
     [ -b "/dev/$name" ] || continue
+    # The whole disk: a read-only disk makes every partition on it read-only,
+    # userdata included, so only its /dev node is removed (below)
+    case $name in mmcblk[0-9]|mmcblk[0-9][0-9])
+      : > "/run/emmc-ro/$name"; continue ;;
+    esac
+    part=$(sed -n 's/^PARTNAME=//p' "$s/uevent")
+    [ -n "$part" ] && ln -sf "/dev/$name" "/dev/by-name/$part"
+    case " $EMMC_RW " in *" $part "*)
+      [ -n "$part" ] && : > "/run/emmc-ro/$name" && say "emmc-ro: /dev/$name ($part) left writable"
+      continue ;;
+    esac
     if blockdev --setro "/dev/$name" && [ "$(cat "$s/ro")" = 1 ]; then
       : > "/run/emmc-ro/$name"
-      say "emmc-ro: /dev/$name read-only"
+      say "emmc-ro: /dev/$name${part:+ ($part)} read-only"
     else
       say "emmc-ro: FAILED to make /dev/$name read-only"
+      : > /run/emmc-ro-failed
     fi
   done
   for s in /dev/mmcblk[0-9]; do
@@ -48,8 +73,9 @@ emmc_ro_pass() {
 }
 emmc_ro_pass
 ( while :; do emmc_ro_pass; sleep 1; done ) &
+guard_pid=$!
 
-say "N1 on $(cat /proc/sys/kernel/osrelease), cpus online $(cat /sys/devices/system/cpu/online)"
+say "angler initramfs on $(cat /proc/sys/kernel/osrelease), cpus online $(cat /sys/devices/system/cpu/online)"
 
 # USB gadget: CDC NCM network + ACM serial console
 g=/sys/kernel/config/usb_gadget/g1
@@ -95,22 +121,83 @@ dropbear -R -E -p 22 2>/dev/null && say "ssh: root@172.16.42.1"
 
 # A shell on the ACM serial port as a second way in
 ( while :; do setsid sh -c 'exec sh </dev/ttyGS0 >/dev/ttyGS0 2>&1'; sleep 1; done ) &
+acm_pid=$!
 
 say "ready"
 
+# --- Switch to the Arch root on userdata ---
+# Skipped with "ramroot" on the command line, or when the last Arch boot never
+# confirmed itself: /.omamobile/pending is written here and removed by the
+# root's omamobile-boot-ok.service once sshd has run for 30 s. If it is still
+# there after 4 minutes, the dead-man reboots (sysrq, a builtin echo) into
+# the boot partition, and the leftover marker keeps that boot in RAM.
+switch_to_root() {
+  grep -qw ramroot /proc/cmdline && { say "root: ramroot, staying in RAM"; return; }
+  for i in $(seq 1 10); do [ -b /dev/by-name/userdata ] && break; sleep 1; done
+  [ -b /dev/by-name/userdata ] || { say "root: no userdata partition"; return; }
+  [ -e /run/emmc-ro-failed ] && { say "root: storage guard failed, staying in RAM"; return; }
+  # Every partition must be guarded before anything runs from the eMMC
+  for s in /sys/class/block/mmcblk*p*; do
+    [ -e "/run/emmc-ro/${s##*/}" ] || { say "root: ${s##*/} not guarded yet"; return; }
+  done
+  fsck.ext4 -p /dev/by-name/userdata >/dev/kmsg 2>&1
+  [ $? -lt 4 ] || { say "root: fsck failed"; return; }
+  mkdir -p /newroot
+  mount -t ext4 -o rw,noatime /dev/by-name/userdata /newroot 2>/dev/null || { say "root: userdata is not ext4"; return; }
+  if [ ! -x /newroot/usr/lib/systemd/systemd ]; then
+    say "root: no systemd on userdata"; umount /newroot; return
+  fi
+  if [ -e /newroot/.omamobile/pending ]; then
+    mv /newroot/.omamobile/pending "/newroot/.omamobile/failed-$(date +%s)"
+    say "root: the last Arch boot never confirmed; staying in RAM"
+    umount /newroot; return
+  fi
+  mkdir -p /newroot/.omamobile && date > /newroot/.omamobile/pending && sync
+
+  # Dead-man. After switch_root this initramfs is freed, so it may only use
+  # shell builtins: read -t on a FIFO is the timer, and /proc/1/root is the
+  # Arch root.
+  mkfifo /run/deadman
+  (
+    exec 3<>/run/deadman
+    read -t 240 _ <&3
+    if [ -e /proc/1/root/.omamobile/pending ]; then
+      echo "omamobile: dead-man: Arch never confirmed; rebooting" > /dev/kmsg
+      echo b > /proc/sysrq-trigger
+    fi
+  ) &
+
+  # Everything that runs programs from this initramfs has to stop first: its
+  # files are freed at switch_root, and a loop whose sleep fails spins (the
+  # self-recovery loop would reach its sysrq crash at once). fbkick, the
+  # watchdog feeder and the dead-man keep running.
+  kill $guard_pid $acm_pid $sr_pid 2>/dev/null
+  fuser -k /dev/ttyGS0 >/dev/null 2>&1
+  killall udhcpd dropbear 2>/dev/null
+  say "root: switching to Arch on userdata"
+  mount --move /dev /newroot/dev
+  mount --move /proc /newroot/proc
+  mount --move /sys /newroot/sys
+  mount --move /run /newroot/run
+  exec switch_root /newroot /usr/lib/systemd/systemd
+}
+
 # Self-recovery: if no host configures the USB gadget within 45 s, panic.
-# panic=10 reboots, and since fastboot boot is one-shot the phone comes back
-# up in stock Android from its boot partition.
+# panic=10 reboots into the image in the boot partition (fastboot boot is
+# one-shot).
 (
   for i in $(seq 1 45); do
     grep -qx configured /sys/class/udc/*/state 2>/dev/null && exit 0
     sleep 1
   done
-  say "USB never configured; crashing so the phone reboots to stock"
+  say "USB never configured; crashing so the phone reboots"
   dmesg | grep -iE 'dwc3|phy|usb|udc|clk|error|fail' | tail -20 > /dev/kmsg
   sleep 2
   echo c > /proc/sysrq-trigger
 ) &
+sr_pid=$!
+
+switch_to_root
 
 # PID 1 must never exit
 while :; do sleep 3600; done

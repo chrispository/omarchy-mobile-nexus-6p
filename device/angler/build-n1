@@ -63,8 +63,21 @@ in_container "
   fdtput -t i $KERNEL_OUT/angler.dtb \$fb stride 4320
   fdtput -t s $KERNEL_OUT/angler.dtb \$fb format r8g8b8
   fdtput -t s $KERNEL_OUT/angler.dtb \$fb status okay
+  # ramoops (crash logs across the warm reset): the last MiB of the splash
+  # reservation, which the 1440x2560 buffer (to 0x03e8c000) doesn't use.
+  # The known-good image reserves this range no-map, so it can read a crashed
+  # test boot's log back with memdump.
+  fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/memory@3401000 reg 0 0x03401000 0 0x00bff000
+  fdtput -c $KERNEL_OUT/angler.dtb /reserved-memory/ramoops@4000000
+  fdtput -t s $KERNEL_OUT/angler.dtb /reserved-memory/ramoops@4000000 compatible ramoops
+  fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/ramoops@4000000 reg 0 0x04000000 0 0x00100000
+  fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/ramoops@4000000 record-size 0x20000
+  fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/ramoops@4000000 console-size 0x80000
+  fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/ramoops@4000000 pmsg-size 0
+  aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/memdump $DEV/tools/memdump.c
   aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/fbkick $DEV/tools/fbkick.c
   aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/peek $DEV/tools/peek.c
+  aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/reboot-to $DEV/tools/reboot-to.c
 "
 # The fragment must have survived olddefconfig (a missing dependency drops a
 # symbol silently)
@@ -92,14 +105,15 @@ mkdir -p "$dl"
 echo "$sum  $dl/$tarball" | sha256sum -c --quiet || die "checksum mismatch for $tarball"
 rm -rf "$stage" && mkdir -p "$stage"
 tar -xzf "$dl/$tarball" -C "$stage"
-# busybox-extras: udhcpd, which Alpine's busybox leaves out
-for apk in $(python3 -I "$ROOT/tools/alpine-fetch.py" "$ver" "$dl/apks" dropbear busybox-extras); do
+# busybox-extras: udhcpd, which Alpine's busybox leaves out; e2fsprogs and GNU tar
+# (xattrs, for file capabilities) to set up the Arch root
+for apk in $(python3 -I "$ROOT/tools/alpine-fetch.py" "$ver" "$dl/apks" dropbear busybox-extras e2fsprogs tar); do
   tar -xzf "$apk" -C "$stage" --exclude='.PKGINFO' --exclude='.SIGN.*' --exclude='.*.sh' 2>/dev/null || true
 done
 [[ -e $stage/usr/sbin/udhcpd ]] || ln -s /bin/busybox-extras "$stage/usr/sbin/udhcpd"
 [[ -x $stage/usr/sbin/dropbear ]] || die "the initramfs has no dropbear"
 install -m 755 "$DEV/initramfs/init" "$stage/init"
-install -m 755 "$KERNEL_OUT/fbkick" "$KERNEL_OUT/peek" "$stage/usr/bin/"
+install -m 755 "$KERNEL_OUT/fbkick" "$KERNEL_OUT/peek" "$KERNEL_OUT/reboot-to" "$KERNEL_OUT/memdump" "$stage/usr/bin/"
 mkdir -p "$stage/root/.ssh"
 cat "$HOME"/.ssh/*.pub > "$stage/root/.ssh/authorized_keys"
 chmod 700 "$stage/root/.ssh" && chmod 600 "$stage/root/.ssh/authorized_keys"

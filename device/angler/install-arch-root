@@ -1,0 +1,79 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Install Arch Linux ARM on the Nexus 6P's userdata partition (nexus_linux_plan.md
+# N3). Run it against the angler initramfs in RAM-root mode (booted with
+# "ramroot", or before userdata holds a root), over USB SSH.
+#
+#   install-arch-root --format    mkfs.ext4 userdata first (erases it)
+#   install-arch-root             unpack into an existing ext4 userdata
+#
+# The tarball's signature is checked against the Arch Linux ARM build key.
+# Only the partition named userdata is written; the initramfs guard keeps the
+# rest read-only.
+set -euo pipefail
+
+DEV="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+DL="${DL:-$HOME/android/downloads/alarm}"
+TARBALL=ArchLinuxARM-aarch64-latest.tar.gz
+ALARM_KEY=68B3537F39A313B3E574D06777193F152BDBE6A6
+PHONE="${PHONE:-root@172.16.42.1}"
+SSH=(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$PHONE")
+
+say() { printf '\e[1m==> %s\e[0m\n' "$*"; }
+die() { printf '\e[31merror:\e[0m %s\n' "$*" >&2; exit 1; }
+
+format=0
+[[ ${1:-} == --format ]] && format=1
+
+say "Arch Linux ARM tarball"
+mkdir -p "$DL"
+for f in "$TARBALL" "$TARBALL.sig"; do
+  [[ -f $DL/$f ]] || curl -fsSL -o "$DL/$f" "http://os.archlinuxarm.org/os/$f"
+done
+gnupg=$(mktemp -d); trap 'rm -rf "$gnupg"' EXIT
+GNUPGHOME=$gnupg gpg -q --keyserver hkps://keyserver.ubuntu.com --recv-keys "$ALARM_KEY" 2>/dev/null
+GNUPGHOME=$gnupg gpg --status-fd 1 --verify "$DL/$TARBALL.sig" "$DL/$TARBALL" 2>/dev/null |
+  grep -q "VALIDSIG $ALARM_KEY" || die "bad signature on $TARBALL"
+
+say "Phone checks"
+"${SSH[@]}" sh -s <<'EOF' || die "the phone is not ready for an install"
+set -e
+[ -b /dev/by-name/userdata ] || { echo "no /dev/by-name/userdata (eMMC driver?)"; exit 1; }
+[ ! -e /run/emmc-ro-failed ] || { echo "the storage guard failed"; exit 1; }
+[ "$(cat /sys/class/block/$(basename $(readlink /dev/by-name/userdata))/ro)" = 0 ] || { echo "userdata is read-only"; exit 1; }
+! grep -q ' /newroot ' /proc/mounts || { echo "a root is already mounted (not in RAM-root mode)"; exit 1; }
+for b in /sys/class/block/mmcblk*p*; do
+  n=${b##*/}; p=$(sed -n 's/^PARTNAME=//p' $b/uevent)
+  [ "$p" = userdata ] && continue
+  [ "$(cat $b/ro)" = 1 ] || { echo "$n ($p) is writable"; exit 1; }
+done
+echo "guard ok: only userdata is writable"
+EOF
+
+if (( format )); then
+  say "Formatting userdata (ext4)"
+  "${SSH[@]}" 'mkfs.ext4 -q -F -L angler-root /dev/by-name/userdata'
+fi
+
+say "Unpacking $TARBALL"
+"${SSH[@]}" 'mkdir -p /mnt/root && mount -t ext4 -o rw,noatime /dev/by-name/userdata /mnt/root'
+"${SSH[@]}" 'tar -xzp --xattrs --xattrs-include="*" --numeric-owner -C /mnt/root -f -' < "$DL/$TARBALL"
+
+say "Angler overlay"
+tar -C "$DEV/rootfs" --owner=0 --group=0 -cf - . | "${SSH[@]}" 'tar -xp --no-same-owner -C /mnt/root -f - && chown -R 0:0 /mnt/root/etc/systemd/system/omamobile-boot-ok.service'
+cat "$HOME"/.ssh/*.pub | "${SSH[@]}" 'install -d -m 700 /mnt/root/root/.ssh && cat > /mnt/root/root/.ssh/authorized_keys && chmod 600 /mnt/root/root/.ssh/authorized_keys'
+"${SSH[@]}" sh -s <<'EOF'
+set -e
+r=/mnt/root
+# Units: boot-ok and a serial login on the USB ACM port
+ln -sf /etc/systemd/system/omamobile-boot-ok.service $r/etc/systemd/system/multi-user.target.wants/
+mkdir -p $r/etc/systemd/system/getty.target.wants
+ln -sf /usr/lib/systemd/system/serial-getty@.service $r/etc/systemd/system/getty.target.wants/serial-getty@ttyGS0.service
+# No password logins: lock the image's default alarm and root passwords
+sed -i -E 's/^(root|alarm):[^:]*:/\1:!:/' $r/etc/shadow
+# The image's kernel is for other boards; this phone boots ours
+date -u > $r/.omamobile-installed
+sync
+umount $r
+EOF
+say "Arch Linux ARM installed on userdata. Reboot without ramroot to use it."

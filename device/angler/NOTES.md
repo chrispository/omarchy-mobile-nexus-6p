@@ -17,6 +17,19 @@ angler-03.78), with the reason for each. Plan and results:
 - **The bootloader appends the serial number and Wi-Fi/BT MACs to the
   cmdline:** never commit `/proc/cmdline` or the top of `dmesg`.
 - **The container's `mkbootimg` is broken** (no `gki` module): use the host's.
+- **Reach fastboot without buttons:** `reboot-to bootloader` writes
+  `0x77665500` to the restart-reason word in shared IMEM (`0xfe87f65c`) and
+  restarts (PS_HOLD, a warm reset); the bootloader reads and clears it.
+  `recovery` is `0x77665502`. Alpine's busybox has no `devmem`.
+- **The APSS watchdog (`0xf9017000`) counts about 176 times slower than the
+  32768 Hz `qcom_wdt` assumes** (the count is `STS >> 1`). `-T 20` never bit
+  in 30 minutes; `-T 1` bit 176 s after the feeder stopped and the phone came
+  back from `boot`. So a driver second is about three real minutes. The bark
+  IRQ never fired.
+- **`switch_root` frees the initramfs:** a background loop that calls
+  `sleep` or `grep` spins once they are gone (the USB self-recovery loop would
+  reach its `sysrq c` at once). Stop them before switching; only builtins and
+  already-running binaries (fbkick, watchdog) are safe after it.
 
 ## Display (MDSS 1.9, dual-DSI command-mode panel)
 

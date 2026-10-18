@@ -1,0 +1,14 @@
+# The USB gadget's network (NCM): the phone is 172.16.42.1 and hands the
+# desktop 172.16.42.2. The initramfs sets the gadget up before switch_root.
+[Match]
+Name=usb0
+
+[Network]
+Address=172.16.42.1/24
+DHCPServer=yes
+
+[DHCPServer]
+PoolOffset=2
+PoolSize=1
+EmitDNS=no
+EmitRouter=no
