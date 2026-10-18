@@ -110,3 +110,15 @@ limits; and making it the default (package version bump, the `mmcc` and
   covers it).
 - G1 image: `7.3.0-rc7-angler+`, `out-angler-gpu/angler-n1.img` sha256
   `da37ce76…dc7dd`, image_size ends at `0x1ad8000`. Not booted yet.
+- **Test images, one kernel** (`LOCALVERSION=-gpu`: release
+  `7.3.0-rc7-angler-gpu`, so its modules install beside the everyday
+  kernel's), in `out-angler-gpu`: `angler-gpu-g1.img` (no nodes enabled,
+  sha256 `faf94566…5f27`), `-g3.img` (the IOMMU, `ca93568a…4fd5`), `-g5.img`
+  (the IOMMU and the GPU, `57aa0e86…e7`). `device/angler/tools/gpu-check`
+  reads each step's Pass items (kernel log, genpd, clocks, DRM) read-only.
+- **Order when the phone is back in Arch on the everyday kernel:** 1.
+  `KERNEL_OUT=~/android/mainline/out-angler-gpu device/angler/tools/modules-push`;
+  2. `pacman -S linux-firmware-qcom` (proxy); 3.
+  `/etc/modprobe.d/omamobile-gpu-bringup.conf` (`blacklist msm`, `options msm
+  separate_gpu_kms=1`). None of these changes the everyday boot. Then G1, G3
+  and G5 with `device/angler/tools/cycle <image>` and `gpu-check` after each.

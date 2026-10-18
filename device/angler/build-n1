@@ -12,6 +12,8 @@
 #   CMDLINE     kernel command line (reboot=warm: the PMIC power-key driver
 #               otherwise makes every restart a hard reset, which loses the
 #               IMEM restart reason reboot-to writes)
+#   LOCALVERSION  release suffix (-gpu): a test kernel's modules then sit
+#               beside the everyday kernel's instead of replacing them
 #   ENABLE      DT node paths to set okay, for a bring-up image
 #               (device/angler/GPU-PLAN.md: /soc@0/iommu@fdb10000 ...)
 set -euo pipefail
@@ -24,6 +26,7 @@ KERNEL_DIR="${KERNEL_DIR:-$WORK/mainline/linux-angler}"
 KERNEL_OUT="${KERNEL_OUT:-$WORK/mainline/out-angler-boot}"
 BOARD_ID="${BOARD_ID:-0x1f57}"
 ENABLE="${ENABLE:-}"
+LOCALVERSION="${LOCALVERSION:-}"
 CMDLINE="${CMDLINE:-panic=10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused reboot=warm loglevel=7 console=tty0 fbcon=font:TER16x32 consoleblank=0 rdinit=/init}"
 IMAGE=angler-build:24.04
 DTB=qcom/msm8994-huawei-angler-rev-101.dtb
@@ -52,9 +55,9 @@ in_container "
   make ARCH=arm64 LLVM=1 O=$KERNEL_OUT defconfig >/dev/null
   scripts/kconfig/merge_config.sh -m -O $KERNEL_OUT $KERNEL_OUT/.config $DEV/kernel.config >/dev/null
   make ARCH=arm64 LLVM=1 O=$KERNEL_OUT olddefconfig >/dev/null
-  make ARCH=arm64 LLVM=1 O=$KERNEL_OUT -j\$(nproc) Image.gz $DTB modules
+  make ARCH=arm64 LLVM=1 O=$KERNEL_OUT LOCALVERSION=$LOCALVERSION -j\$(nproc) Image.gz $DTB modules
   rm -rf $KERNEL_OUT/modules-staging
-  make ARCH=arm64 LLVM=1 O=$KERNEL_OUT INSTALL_MOD_PATH=$KERNEL_OUT/modules-staging INSTALL_MOD_STRIP=1 modules_install >/dev/null
+  make ARCH=arm64 LLVM=1 O=$KERNEL_OUT LOCALVERSION=$LOCALVERSION INSTALL_MOD_PATH=$KERNEL_OUT/modules-staging INSTALL_MOD_STRIP=1 modules_install >/dev/null
   cp $KERNEL_OUT/arch/arm64/boot/dts/$DTB $KERNEL_OUT/angler.dtb
   fdtput -t i $KERNEL_OUT/angler.dtb / qcom,board-id $BOARD_ID 0
   # The bootloader's splash buffer is a simplefb in the DTS (N2), with the

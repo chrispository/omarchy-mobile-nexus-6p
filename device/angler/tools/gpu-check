@@ -1,0 +1,18 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Desktop side (device/angler/GPU-PLAN.md): read-only state of a GPU test boot,
+# for the G1-G6 Pass columns. Reads sysfs/debugfs and the kernel log only.
+S="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 root@172.16.42.1"
+$S '
+d=/sys/kernel/debug
+echo "== $(uname -r), up $(cut -d" " -f1 /proc/uptime)s, battery $(cat /sys/class/power_supply/qcom-battery/voltage_now 2>/dev/null) uV"
+echo "== kernel log (mmcc, gdsc, simpledrm, iommu, ocmem, msm/adreno, faults)"
+dmesg | grep -i -E "mmcc|gdsc|simple-?(drm|framebuffer)|iommu|smmu|ocmem|adreno|msm|a4xx|gpu|fault|hangcheck|firmware" | grep -v -E "usb|ttyMSM" | tail -40
+echo "== power domains (mdss, oxili)"
+grep -A3 -E "^(mdss|oxili)" $d/pm_genpd/pm_genpd_summary 2>/dev/null
+echo "== clocks (mdss, oxili, gfx3d, ocmem)"
+grep -E "mdss_(ahb|axi|mdp|vsync|byte|pclk|esc)|oxili|gfx3d|ocmem" $d/clk/clk_summary 2>/dev/null | awk "{print \$1, \$2, \$3, \$4, \$5}"
+echo "== DRM"
+ls -l /dev/dri 2>/dev/null; for c in /sys/class/drm/card*; do [ -e $c/device/driver ] && echo "$c: $(basename $(readlink $c/device/driver))"; done
+echo "== failed units"; systemctl --failed --no-legend 2>/dev/null
+'
