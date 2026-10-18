@@ -1,0 +1,15 @@
+[Unit]
+Description=Feed the hardware watchdog (a hang resets the phone)
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=sysinit.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+ExecStart=/usr/bin/omamobile-watchdog
+Restart=always
+RestartSec=1
+Nice=-10
+
+[Install]
+WantedBy=sysinit.target

@@ -1,0 +1,13 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Feed the APSS watchdog from Arch, as the initramfs does until switch_root:
+# a hung kernel or userspace then resets the phone (into the image in `boot`)
+# instead of leaving it stuck with no USB. The watchdog counts faster while
+# the CPUs are busy, so feed it every second at its default timeout (30 s
+# nominal); systemd's RuntimeWatchdogSec pings too rarely for that.
+exec 3>/dev/watchdog0
+trap 'printf V >&3; exit 0' TERM INT   # magic close: a clean stop disarms it
+while :; do
+  printf . >&3
+  sleep 1
+done
