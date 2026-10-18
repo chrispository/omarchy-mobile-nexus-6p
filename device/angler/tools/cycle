@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Reboot the phone into fastboot from Linux, fastboot-boot an image, wait for SSH
 # Desktop side (nexus_linux_plan.md): run from the repository.
 # Only the angler is ever addressed: its serial comes from ANGLER_SERIAL or
@@ -13,8 +14,9 @@ in_fastboot() { fastboot devices | awk '{print $1}' | grep -qxF "$serial"; }
 # Fast restart into fastboot: the restart reason reboot-to would write, then
 # sync, remount read-only and an immediate warm restart (SysRq u, b). A full
 # systemd shutdown hung after its final SIGTERM on both kernels
-# (GPU-PLAN.md), and a test cycle doesn't need one. REBOOT=clean uses
-# reboot-to's systemctl path instead.
+# (GPU-PLAN.md), and a test cycle doesn't need one. In the RAM recovery
+# environment reboot-to restarts directly, and Python is absent, so use
+# that binary there. REBOOT=clean also selects reboot-to under systemd.
 fast='python3 -c "
 import mmap, os, struct
 fd = os.open(\"/dev/mem\", os.O_RDWR | os.O_SYNC)
@@ -23,7 +25,7 @@ m[0x65c:0x660] = struct.pack(\"<I\", 0x77665500)
 assert m[0x65c:0x660] == struct.pack(\"<I\", 0x77665500)
 " && sync && echo u > /proc/sysrq-trigger && sleep 1 && echo b > /proc/sysrq-trigger'
 if ! in_fastboot; then
-  if [[ ${REBOOT:-fast} == clean ]]; then
+  if [[ ${REBOOT:-fast} == clean ]] || $S 'test ! -d /run/systemd/system'; then
     $S 'nohup sh -c "sleep 1; reboot-to bootloader" >/dev/null 2>&1 </dev/null &' || { echo "no ssh"; exit 1; }
   else
     $S "nohup sh -c '$fast' >/dev/null 2>&1 </dev/null &" || { echo "no ssh"; exit 1; }

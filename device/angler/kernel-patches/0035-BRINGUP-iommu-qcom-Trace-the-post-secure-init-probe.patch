@@ -1,0 +1,109 @@
+Subject: [PATCH] BRINGUP: iommu/qcom: Trace the post-secure-init probe path
+
+With the multimedia holds in place, SECURE_PTBL_INIT returned zero for
+the first time on 7.3.0-rc7-angler-gpu, the MM holds released (0), and
+the phone reset before any context-bank or registration message. The
+next step could be the runtime-PM put, context population, or the first
+restore_sec_cfg; this log-only diff marks each one.
+
+Apply with git apply after 0034; uncommitted bring-up diff.
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -909,6 +909,8 @@
+ 	struct qcom_iommu_dev *qcom_iommu = dev_get_drvdata(dev->parent);
+ 	int ret, irq;
+ 
++	dev_info(dev, "iommu ctx: probing %pOF\n", dev->of_node);
++
+ 	ctx = devm_kzalloc(dev, sizeof(*ctx), GFP_KERNEL);
+ 	if (!ctx)
+ 		return -ENOMEM;
+@@ -923,6 +925,7 @@
+ 	irq = platform_get_irq(pdev, 0);
+ 	if (irq < 0)
+ 		return irq;
++	dev_info(dev, "iommu ctx: mapped, irq %d\n", irq);
+ 
+ 	if (of_device_is_compatible(dev->of_node, "qcom,msm-iommu-v2-sec"))
+ 		ctx->secured_ctx = true;
+@@ -931,10 +934,13 @@
+ 	 * boot-loader left us a surprise:
+ 	 */
+ 	if (!ctx->secured_ctx) {
++		dev_info(dev, "iommu ctx: resuming parent\n");
+ 		ret = pm_runtime_resume_and_get(dev->parent);
++		dev_info(dev, "iommu ctx: parent resume returned %d\n", ret);
+ 		if (ret)
+ 			return ret;
+ 		iommu_writel(ctx, ARM_SMMU_CB_FSR, iommu_readl(ctx, ARM_SMMU_CB_FSR));
++		dev_info(dev, "iommu ctx: FSR cleared\n");
+ 		pm_runtime_put_sync(dev->parent);
+ 	}
+ 
+@@ -943,6 +949,7 @@
+ 			       IRQF_SHARED,
+ 			       "qcom-iommu-fault",
+ 			       ctx);
++	dev_info(dev, "iommu ctx: irq request returned %d\n", ret);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -954,7 +961,7 @@
+ 
+ 	ctx->asid = ret;
+ 
+-	dev_dbg(dev, "found asid %u\n", ctx->asid);
++	dev_info(dev, "iommu ctx: asid %u\n", ctx->asid);
+ 
+ 	qcom_iommu->ctxs[ctx->asid] = ctx;
+ 
+@@ -1072,16 +1079,20 @@
+ 		if (ret)
+ 			return ret;
+ 		ret = qcom_iommu_sec_ptbl_init(dev);
++		dev_info(dev, "iommu sec: table init returned %d\n", ret);
+ 		pm_runtime_put_sync(dev);
++		dev_info(dev, "iommu sec: runtime PM released after table init\n");
+ 		if (ret) {
+ 			dev_err(dev, "cannot init secure pg table(%d)\n", ret);
+ 			return ret;
+ 		}
+ 	}
+ 	qcom_iommu->sec_cfg_ready = true;
++	dev_info(dev, "iommu sec: cfg ready, populating contexts\n");
+ 
+ 	/* register context bank devices, which are child nodes: */
+ 	ret = devm_of_platform_populate(dev);
++	dev_info(dev, "iommu sec: context populate returned %d\n", ret);
+ 	if (ret) {
+ 		dev_err(dev, "Failed to populate iommu contexts\n");
+ 		return ret;
+@@ -1132,12 +1143,16 @@
+ 	struct qcom_iommu_dev *qcom_iommu = dev_get_drvdata(dev);
+ 	int ret;
+ 
++	dev_info(dev, "iommu pm: resume\n");
+ 	ret = clk_bulk_prepare_enable(CLK_NUM, qcom_iommu->clks);
++	dev_info(dev, "iommu pm: clock enable returned %d\n", ret);
+ 	if (ret < 0)
+ 		return ret;
+ 
+ 	if (dev->pm_domain && qcom_iommu->sec_cfg_ready) {
++		dev_info(dev, "iommu pm: restoring secure config\n");
+ 		ret = qcom_scm_restore_sec_cfg(qcom_iommu->sec_id, 0);
++		dev_info(dev, "iommu pm: restore returned %d\n", ret);
+ 		if (ret)
+ 			clk_bulk_disable_unprepare(CLK_NUM, qcom_iommu->clks);
+ 	}
+@@ -1149,7 +1164,9 @@
+ {
+ 	struct qcom_iommu_dev *qcom_iommu = dev_get_drvdata(dev);
+ 
++	dev_info(dev, "iommu pm: suspend\n");
+ 	clk_bulk_disable_unprepare(CLK_NUM, qcom_iommu->clks);
++	dev_info(dev, "iommu pm: clocks disabled\n");
+ 
+ 	return 0;
+ }

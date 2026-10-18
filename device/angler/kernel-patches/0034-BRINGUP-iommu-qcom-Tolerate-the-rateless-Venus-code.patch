@@ -1,0 +1,49 @@
+Subject: [PATCH] BRINGUP: iommu/qcom: Tolerate the rateless Venus codec clock
+
+The MMCC driver registers venus0_vcodec0_clk but not its parent
+vcodec0_clk_src, so clk_round_rate() returns zero. The first multimedia
+power probe aborted with -EINVAL at clock 121 before reaching the
+probe-only stop: the five domains and the other 14 clocks had been set
+up, cleanup returned, and SSH and the watchdog stayed healthy.
+
+Enable that known gate without a rate, and keep aborting the probe on
+any other clock that cannot produce one, so the remaining multimedia
+SMMUs can be exercised. The real fix is to register the missing clock
+source in mmcc-msm8994.
+
+Apply with git apply after 0033; uncommitted bring-up diff.
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -824,10 +824,26 @@
+ 		}
+ 		if (!clk_get_rate(clk)) {
+ 			rate = clk_round_rate(clk, 1);
+-			ret = rate <= 0 ? -EINVAL : clk_set_rate(clk, rate);
+-			if (ret) {
+-				clk_put(clk);
+-				goto out;
++			if (rate <= 0) {
++				/*
++				 * The MMCC driver never registers vcodec0_clk_src,
++				 * the parent of VENUS0_VCODEC0_CLK. Enable that
++				 * gate without a rate; any other clock that cannot
++				 * produce one still aborts the probe.
++				 */
++				if (clock_ids[i] != VENUS0_VCODEC0_CLK) {
++					ret = rate < 0 ? (int)rate : -EINVAL;
++					clk_put(clk);
++					goto out;
++				}
++				dev_warn(dev, "iommu sec: MM clock %u has no rate source, enabling gate only\n",
++					 clock_ids[i]);
++			} else {
++				ret = clk_set_rate(clk, rate);
++				if (ret) {
++					clk_put(clk);
++					goto out;
++				}
+ 			}
+ 		}
+ 		ret = clk_prepare_enable(clk);

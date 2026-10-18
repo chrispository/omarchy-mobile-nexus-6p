@@ -1,0 +1,28 @@
+Subject: [PATCH] iommu/qcom: Treat v1 secure contexts as secured
+
+The v1 secure context (qcom,msm-iommu-v1-sec) was not marked
+secured_ctx, so probe resumed its parent and read/wrote ARM_SMMU_CB_FSR
+on the secure bank. On angler's GPU SMMU that reset the SoC immediately
+after the secure page table was initialized: the trace stopped between
+"parent resume returned 0" and "FSR cleared" for iommu-ctx@a000.
+
+Mark v1 secure contexts secured like the v2 ones, so the non-secure
+driver leaves the bank to the secure world. The compatible is already
+used to decide whether a secure page table is needed.
+
+Apply with git apply after 0035 for the bring-up image; 0035 is
+diagnostic logging, this one is the functional fix.
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -927,7 +927,8 @@
+ 		return irq;
+ 	dev_info(dev, "iommu ctx: mapped, irq %d\n", irq);
+ 
+-	if (of_device_is_compatible(dev->of_node, "qcom,msm-iommu-v2-sec"))
++	if (of_device_is_compatible(dev->of_node, "qcom,msm-iommu-v1-sec") ||
++	    of_device_is_compatible(dev->of_node, "qcom,msm-iommu-v2-sec"))
+ 		ctx->secured_ctx = true;
+ 
+ 	/* clear IRQs before registering fault handler, just in case the

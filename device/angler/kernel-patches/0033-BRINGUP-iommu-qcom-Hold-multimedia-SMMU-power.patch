@@ -1,0 +1,177 @@
+Subject: [PATCH] BRINGUP: iommu/qcom: Hold other MSM8994 SMMU domains for a test
+
+Secure-table initialization still resets MSM8994 with the GPU SMMU
+powered, its clock voted to 27 MHz and its reserved table zeroed and
+unmapped. Test whether TZ touches another unpowered multimedia SMMU.
+
+The opt-in qcom_iommu.ptbl_mm_power=1 creates temporary genpd consumers
+for Venus, JPEG, VFE, CPP and FD and enables the clocks listed for their
+SMMUs in Google's GPL msm8994-iommu.dtsi. MDSS and GPU have existing
+consumers. Release clock and domain holds after the table helper returns.
+First use ptbl_probe_only=1 to exercise setup and cleanup without the
+secure table calls. Hardware behavior is untested; this is not a fix.
+
+Apply with git apply after 0031 and 0032; uncommitted bring-up diff.
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -22,15 +22,19 @@
+ #include <linux/init.h>
+ #include <linux/mutex.h>
+ #include <linux/of.h>
++#include <linux/of_clk.h>
+ #include <linux/of_platform.h>
+ #include <linux/of_reserved_mem.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm.h>
++#include <linux/pm_domain.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/firmware/qcom/qcom_scm.h>
+ #include <linux/slab.h>
+ #include <linux/spinlock.h>
+ 
++#include <dt-bindings/clock/qcom,mmcc-msm8994.h>
++
+ #include "arm-smmu.h"
+ 
+ /* MAXIMUM_VIRT_SIZE in the vendor kernel */
+@@ -48,6 +52,10 @@
+ static bool ptbl_zero;
+ module_param(ptbl_zero, bool, 0444);
+ MODULE_PARM_DESC(ptbl_zero, "Clear the reserved table before handing it to TZ");
++
++static bool ptbl_mm_power;
++module_param(ptbl_mm_power, bool, 0444);
++MODULE_PARM_DESC(ptbl_mm_power, "Hold MSM8994 multimedia SMMU power and clocks");
+ 
+ #define SMMU_INTR_SEL_NS     0x2000
+ 
+@@ -625,7 +633,7 @@
+ 	}
+ };
+ 
+-static int qcom_iommu_sec_ptbl_init(struct device *dev)
++static int qcom_iommu_sec_ptbl_init_inner(struct device *dev)
+ {
+ 	struct qcom_iommu_dev *iommu = dev_get_drvdata(dev);
+ 	size_t psize = 0;
+@@ -739,6 +747,118 @@
+ 
+ free_mem:
+ 	dma_free_attrs(dev, psize, cpu_addr, paddr, attrs);
++	return ret;
++}
++
++/*
++ * BRINGUP only: the vendor's MSM8994 SMMU supplies and clocks, from
++ * msm8994-iommu.dtsi. MDSS is already held by the framebuffer, and the
++ * GPU SMMU is held by its own runtime-PM reference. No sensor rails or
++ * multimedia engines are started here.
++ */
++static int qcom_iommu_sec_ptbl_init(struct device *dev)
++{
++	static const unsigned int domain_ids[] = {
++		VENUS_GDSC, JPEG_GDSC, VFE_GDSC, CPP_GDSC, FD_GDSC,
++	};
++	static const unsigned int clock_ids[] = {
++		VENUS0_AXI_CLK, VENUS0_AHB_CLK, VENUS0_VCODEC0_CLK,
++		CAMSS_JPEG_JPEG_AXI_CLK, CAMSS_JPEG_JPEG_AHB_CLK,
++		CAMSS_VFE_VFE_AXI_CLK, CAMSS_VFE_VFE_AHB_CLK,
++		CAMSS_VFE_CPP_AXI_CLK, CAMSS_VFE_CPP_AHB_CLK,
++		CAMSS_AHB_CLK, CAMSS_TOP_AHB_CLK,
++		FD_AXI_CLK, FD_AHB_CLK, FD_CORE_CLK, FD_CORE_UAR_CLK,
++	};
++	struct platform_device *domains[ARRAY_SIZE(domain_ids)];
++	struct clk *clocks[ARRAY_SIZE(clock_ids)];
++	struct of_phandle_args args = { .args_count = 1 };
++	unsigned int num_domains = 0, num_clocks = 0, i;
++	int ret;
++
++	if (!ptbl_mm_power)
++		return qcom_iommu_sec_ptbl_init_inner(dev);
++	if (!of_device_is_compatible(dev->of_node, "qcom,msm8994-iommu"))
++		return -EINVAL;
++
++	args.np = of_parse_phandle(dev->of_node, "power-domains", 0);
++	if (!args.np)
++		return -EINVAL;
++
++	for (i = 0; i < ARRAY_SIZE(domain_ids); i++) {
++		struct platform_device *pd;
++
++		dev_info(dev, "iommu sec: holding MM domain %u\n", domain_ids[i]);
++		pd = platform_device_register_simple("qcom-iommu-mm-hold",
++						     PLATFORM_DEVID_AUTO, NULL, 0);
++		if (IS_ERR(pd)) {
++			ret = PTR_ERR(pd);
++			goto out;
++		}
++		args.args[0] = domain_ids[i];
++		ret = of_genpd_add_device(&args, &pd->dev);
++		if (ret) {
++			platform_device_unregister(pd);
++			goto out;
++		}
++		pm_runtime_enable(&pd->dev);
++		ret = pm_runtime_resume_and_get(&pd->dev);
++		if (ret < 0) {
++			pm_runtime_disable(&pd->dev);
++			pm_genpd_remove_device(&pd->dev);
++			platform_device_unregister(pd);
++			goto out;
++		}
++		domains[num_domains++] = pd;
++	}
++
++	for (i = 0; i < ARRAY_SIZE(clock_ids); i++) {
++		struct clk *clk;
++		long rate;
++
++		dev_info(dev, "iommu sec: enabling MM clock %u\n", clock_ids[i]);
++		args.args[0] = clock_ids[i];
++		clk = of_clk_get_from_provider(&args);
++		if (IS_ERR(clk)) {
++			ret = PTR_ERR(clk);
++			goto out;
++		}
++		if (!clk_get_rate(clk)) {
++			rate = clk_round_rate(clk, 1);
++			ret = rate <= 0 ? -EINVAL : clk_set_rate(clk, rate);
++			if (ret) {
++				clk_put(clk);
++				goto out;
++			}
++		}
++		ret = clk_prepare_enable(clk);
++		if (ret) {
++			clk_put(clk);
++			goto out;
++		}
++		clocks[num_clocks++] = clk;
++		dev_info(dev, "iommu sec: MM clock %u rate %lu Hz\n",
++			 clock_ids[i], clk_get_rate(clk));
++	}
++	dev_info(dev, "iommu sec: holding %u MM domains and %u clocks\n",
++		 num_domains, num_clocks);
++	ret = qcom_iommu_sec_ptbl_init_inner(dev);
++out:
++	while (num_clocks) {
++		struct clk *clk = clocks[--num_clocks];
++
++		clk_disable_unprepare(clk);
++		clk_put(clk);
++	}
++	while (num_domains) {
++		struct device *pd = &domains[--num_domains]->dev;
++
++		pm_runtime_put_sync(pd);
++		pm_runtime_disable(pd);
++		pm_genpd_remove_device(pd);
++		platform_device_unregister(to_platform_device(pd));
++	}
++	of_node_put(args.np);
++	dev_info(dev, "iommu sec: MM holds released (%d)\n", ret);
+ 	return ret;
+ }
+ 

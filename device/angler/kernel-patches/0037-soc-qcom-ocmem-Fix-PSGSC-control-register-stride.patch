@@ -1,0 +1,27 @@
+Subject: [PATCH] soc: qcom: ocmem: Fix PSGSC control register stride
+
+The PSGSC control registers are 32-bit and four bytes apart. Google's
+GPL angler 3.10 driver has PSCGC_CTL_IDX(x) = (x) * 0x4, but mainline
+used a one-byte stride. On a SoC with more than one OCMEM region, the
+second and later ocmem_write() calls therefore hit unaligned
+addresses.
+
+On msm8994 (three regions) the GPU's first ocmem_allocate() took an
+alignment fault in update_range() and the probe oopsed before the
+Adreno could be initialized.
+
+Use the four-byte stride. Evidence: android-msm-angler-3.10-oreo-mr1,
+drivers/soc/qcom/ocmem_core.c, PSCGC_CTL_IDX() and PSCGC_CTL_n().
+
+diff --git a/drivers/soc/qcom/ocmem.c b/drivers/soc/qcom/ocmem.c
+--- a/drivers/soc/qcom/ocmem.c
++++ b/drivers/soc/qcom/ocmem.c
+@@ -92,7 +92,7 @@
+ #define OCMEM_REG_GEN_STATUS			0x0000000c
+ 
+ #define OCMEM_REG_PSGSC_STATUS			0x00000038
+-#define OCMEM_REG_PSGSC_CTL(i0)			(0x0000003c + 0x1*(i0))
++#define OCMEM_REG_PSGSC_CTL(i0)			(0x0000003c + 0x4 * (i0))
+ 
+ #define OCMEM_PSGSC_CTL_MACRO0_MODE(val)	FIELD_PREP(0x00000007, (val))
+ #define OCMEM_PSGSC_CTL_MACRO1_MODE(val)	FIELD_PREP(0x00000070, (val))

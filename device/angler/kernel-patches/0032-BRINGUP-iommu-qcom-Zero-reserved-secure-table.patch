@@ -1,0 +1,42 @@
+Subject: [PATCH] BRINGUP: iommu/qcom: Optionally zero the reserved secure table
+
+The vendor DMA allocator clears its buffer before removing the linear
+mapping. Our reserved-memory path leaves the table uninitialized.
+Add qcom_iommu.ptbl_zero=1 for a controlled test of this difference.
+Clear through a temporary write-combining mapping and remove it before
+handing the memory to secure world. This is not yet a validated fix.
+
+Apply with git apply after 0031; this is an uncommitted bring-up diff.
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -45,6 +45,10 @@
+ module_param(ptbl_bus_rate, ulong, 0444);
+ MODULE_PARM_DESC(ptbl_bus_rate, "Set the enabled SMMU bus clock before table setup");
+ 
++static bool ptbl_zero;
++module_param(ptbl_zero, bool, 0444);
++MODULE_PARM_DESC(ptbl_zero, "Clear the reserved table before handing it to TZ");
++
+ #define SMMU_INTR_SEL_NS     0x2000
+ 
+ enum qcom_iommu_clk {
+@@ -692,6 +696,17 @@
+ 		}
+ 
+ 		paddr = rmem->base;
++		if (ptbl_zero) {
++			void __iomem *table = ioremap_wc(paddr, psize);
++
++			if (!table)
++				return -ENOMEM;
++			memset_io(table, 0, psize);
++			/* Complete the table writes before handing ownership to TZ. */
++			wmb();
++			iounmap(table);
++			dev_info(dev, "iommu sec: reserved table zeroed and unmapped\n");
++		}
+ 		dev_info(dev, "iommu sec: pgtable at %pad (reserved)\n", &paddr);
+ 		ret = qcom_scm_iommu_secure_ptbl_init(paddr, psize, spare);
+ 		if (ret) {

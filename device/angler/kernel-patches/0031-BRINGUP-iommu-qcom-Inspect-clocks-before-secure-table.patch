@@ -1,0 +1,72 @@
+Subject: [PATCH] BRINGUP: iommu/qcom: Inspect clocks before secure table setup
+
+MSM8994 loses USB inside the secure table initialization call even with
+runtime PM enabled around it. The downstream driver also sets a rate
+when its core clock starts at zero; our bring-up path does not.
+
+Add a read-only boot parameter, qcom_iommu.ptbl_probe_only=1, to report
+runtime-PM state and the clock-framework rates after resume, then return
+-EAGAIN before any secure table calls. This diagnostic deliberately
+leaves the IOMMU unbound. It does not establish the hardware's actual
+clock rate or implement a production fix.
+
+The optional qcom_iommu.ptbl_bus_rate sets the enabled bus clock and
+checks the reported rate before proceeding.
+
+Apply with git apply; this is an uncommitted bring-up diff on top of 0030.
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+index ed3a6a195..aa49a028b 100644
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -36,6 +36,15 @@
+ /* MAXIMUM_VIRT_SIZE in the vendor kernel */
+ #define QCOM_IOMMU_CP_POOL_SIZE	(300 * SZ_1M)
+ 
++/* BRINGUP: inspect the powered SMMU without invoking secure table setup. */
++static bool ptbl_probe_only;
++module_param(ptbl_probe_only, bool, 0444);
++MODULE_PARM_DESC(ptbl_probe_only, "Report SMMU clocks and skip secure table setup");
++
++static unsigned long ptbl_bus_rate;
++module_param(ptbl_bus_rate, ulong, 0444);
++MODULE_PARM_DESC(ptbl_bus_rate, "Set the enabled SMMU bus clock before table setup");
++
+ #define SMMU_INTR_SEL_NS     0x2000
+ 
+ enum qcom_iommu_clk {
+@@ -614,6 +623,7 @@ static const struct iommu_ops qcom_iommu_ops = {
+ 
+ static int qcom_iommu_sec_ptbl_init(struct device *dev)
+ {
++	struct qcom_iommu_dev *iommu = dev_get_drvdata(dev);
+ 	size_t psize = 0;
+ 	unsigned int spare = 0;
+ 	void *cpu_addr;
+@@ -626,6 +636,26 @@ static int qcom_iommu_sec_ptbl_init(struct device *dev)
+ 	if (allocated)
+ 		return 0;
+ 
++	/* The RPM clock driver ignores rate changes while disabled. */
++	if (ptbl_bus_rate) {
++		ret = clk_set_rate(iommu->clks[CLK_BUS].clk, ptbl_bus_rate);
++		if (ret)
++			return dev_err_probe(dev, ret, "cannot set SMMU bus rate\n");
++		if (clk_get_rate(iommu->clks[CLK_BUS].clk) != ptbl_bus_rate)
++			return dev_err_probe(dev, -EINVAL, "SMMU bus rate mismatch\n");
++	}
++
++	dev_info(dev, "iommu sec: runtime active=%d\n", pm_runtime_active(dev));
++	dev_info(dev, "iommu sec: iface=%lu bus=%lu tbu=%lu Hz\n",
++		 clk_get_rate(iommu->clks[CLK_IFACE].clk),
++		 clk_get_rate(iommu->clks[CLK_BUS].clk),
++		 clk_get_rate(iommu->clks[CLK_TBU].clk));
++
++	if (ptbl_probe_only) {
++		dev_info(dev, "iommu sec: stopping before secure table calls\n");
++		return -EAGAIN;
++	}
++
+ 	/*
+ 	 * The vendor kernel sizes the content protection pool before it asks
+ 	 * for the secure page table's size, on firmware that supports it
