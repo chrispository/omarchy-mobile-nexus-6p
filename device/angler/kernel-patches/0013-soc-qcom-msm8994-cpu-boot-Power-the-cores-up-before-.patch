@@ -1,0 +1,358 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 08:15:17 -0600
+Subject: [PATCH 13/15] soc: qcom: msm8994-cpu-boot: Power the cores up before
+ SMP init, add the A57 cluster
+
+Cores brought up after boot are checked against the CPU errata and
+mitigations the boot CPUs set up: an A57 core onlined late from an
+A53-only system is refused ("Detected conflict for capability 82
+(Spectre-v2)"). Power the cores up from an early initcall instead,
+between smp_prepare_cpus() and smp_init(), so both clusters boot as
+boot-time CPUs. SCM has not probed then, so make the two SCM calls
+(SET_ADDR_MC and the L2 IO write, SMC32 on this firmware) directly.
+
+For the A57 cluster, turn on its rail through the L2 SAW, power up the
+L2 and select GPLL0 for the cluster (its mux resets to XO), as
+power_on_l2_msm8994() and msm_spm_turn_on_cpu_rail() in Google's angler
+kernel do. Tested at runtime: the L2 came up (PWR_CTL 0x90022218, like
+the A53 cluster's) and CPU4 ran kernel code until the capability check
+refused it.
+---
+ drivers/soc/qcom/Kconfig            |  10 +-
+ drivers/soc/qcom/msm8994-cpu-boot.c | 221 ++++++++++++++++++++++++----
+ 2 files changed, 195 insertions(+), 36 deletions(-)
+
+diff --git a/drivers/soc/qcom/Kconfig b/drivers/soc/qcom/Kconfig
+index 579b5fc7b..7c0956c9c 100644
+--- a/drivers/soc/qcom/Kconfig
++++ b/drivers/soc/qcom/Kconfig
+@@ -123,12 +123,12 @@ config QCOM_PMIC_GLINK
+ 	  platforms.
+ 
+ config QCOM_MSM8994_CPU_BOOT
+-	tristate "MSM8994 secondary CPU power-up without PSCI"
+-	depends on ARM64 && QCOM_SCM && OF
++	bool "MSM8994 secondary CPU power-up without PSCI"
++	depends on ARM64 && OF
+ 	help
+-	  Power up the secondary Cortex-A53 cores of MSM8994 devices whose TZ
+-	  firmware has no PSCI (such as the Huawei Nexus 6P), for the
+-	  spin-table enable method. Bring them online through sysfs afterwards.
++	  Power up the secondary cores of MSM8994 devices whose TZ firmware
++	  has no PSCI (such as the Huawei Nexus 6P) before SMP init, for the
++	  spin-table enable method.
+ 
+ config QCOM_PMIC_SEC_WRITE
+ 	tristate
+diff --git a/drivers/soc/qcom/msm8994-cpu-boot.c b/drivers/soc/qcom/msm8994-cpu-boot.c
+index 0aaa482cc..8c53eb63b 100644
+--- a/drivers/soc/qcom/msm8994-cpu-boot.c
++++ b/drivers/soc/qcom/msm8994-cpu-boot.c
+@@ -1,38 +1,65 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+- * Power up the secondary Cortex-A53 cores of MSM8994 on firmware without PSCI.
++ * Power up the secondary cores of MSM8994 on firmware without PSCI.
+  *
+  * The TZ firmware of devices such as the Huawei Nexus 6P (angler) has no PSCI,
+  * so only the boot CPU runs. Its downstream kernel sets the cores' boot
+  * address through SCM and powers them up through their ACC registers itself
+  * (drivers/soc/qcom/cpu_pwr_ctl.c and cpu_ops.c in Google's
+- * android-msm-angler-3.10 kernel). This driver does the same for arm64's
++ * android-msm-angler-3.10 kernel). This code does the same for arm64's
+  * "spin-table" enable method:
+  *
+  *  - the DT describes the CPUs with enable-method "spin-table" and a
+  *    cpu-release-addr at offset 0x88 of a reserved "spin-table" page;
+- *  - at boot the kernel writes the address of its holding pen there;
+- *  - this driver puts a small spin loop at the start of the page, points
+- *    the cores' cold-boot address at it through SCM and powers the cores up:
+- *    each one spins until the release address is set, then enters the pen;
+- *  - "echo 1 > /sys/devices/system/cpu/cpuN/online" brings it into Linux.
++ *  - smp_prepare_cpus() writes the address of the kernel's holding pen there;
++ *  - this early initcall puts a small spin loop at the start of the page,
++ *    points the cores' cold-boot address at it through SCM and powers the
++ *    cores up: each one spins until the release address is set, then enters
++ *    the pen;
++ *  - smp_init() then brings them up like any boot-time CPU, so the CPU
++ *    errata and mitigations of both clusters are set up at boot. (A57 cores
++ *    brought up later are refused: the system was set up without their
++ *    workarounds.)
+  *
+- * Only the A53 cluster (CPU1-3), whose L2 is already powered because the boot
+- * CPU runs there, is handled. The A57 cluster also needs its L2 and clock.
++ * It runs before the SCM driver probes, so it makes the two SCM calls itself
++ * (SMC32 convention, as this firmware uses).
++ *
++ * The A53 cluster's L2 is already powered, because the boot CPU runs there.
++ * For the A57 cluster (CPU4-7) the cluster's rail is turned on through its L2
++ * SAW, the L2 is powered up (power_on_l2_msm8994() downstream) and a clock
++ * source is selected for the cluster: the auxiliary clock by default, since
++ * nothing programs the A57 PLLs or the rail's CPR corner.
+  */
+ 
++#include <linux/arm-smccc.h>
+ #include <linux/bits.h>
++#include <linux/cpumask.h>
+ #include <linux/delay.h>
+-#include <linux/firmware/qcom/qcom_scm.h>
++#include <linux/init.h>
+ #include <linux/io.h>
+-#include <linux/module.h>
++#include <linux/moduleparam.h>
+ #include <linux/of.h>
+ #include <linux/of_address.h>
++#include <linux/slab.h>
++
++#include <asm/cacheflush.h>
+ 
+ #define ACC_BASE(cpu)		(0xf908b000 + (cpu) * 0x10000)
+ #define LDO_BASE(cpu)		(0xf9070000 + (cpu) * 0x1000)
+ #define L2_PWR_SEC_REG		0xf911210c	/* through SCM IO */
+ 
++/* A57 cluster: L2 clock controller (with the cluster's clock mux) and SAW */
++#define A57_L2CCC_BASE		0xf900f000
++#define A57_SAW_BASE		0xf9013000
++#define L2_PWR_CTL_OVERRIDE	0xc
++#define L2_PWR_CTL		0x14
++#define CLK_MUX			0x54
++#define Q2S_CTL			0x210
++#define L1_RST_DIS		0x284
++#define L2_PWR_ON_MASK		(BIT(9) | BIT(28))
++#define SAW_VCTL		0x1c
++#define A57_VCTL_VAL		0xb8	/* qcom,vctl-val of angler's l2ccc_1 */
++
+ #define CPU_PWR_CTL		0x4
+ #define CPU_PWR_GATE_CTL	0x14
+ 
+@@ -40,19 +67,76 @@
+ #define APC_LDO_CFG1		0xc
+ #define APC_LDO_CFG2		0x10
+ #define APC_LDO_BHS_PWR_CTL	0x28
+-#define LDO_VREF_RET		0x2a
++#define LDO_VREF_RET_A53	0x2a
++#define LDO_VREF_RET_A57	0x3e
+ 
+ #define SCM_BOOT_MC_FLAGS	0x3	/* cold boot, AArch64 (HLOS) */
++#define SCM_SMC32(svc, cmd, call) \
++	ARM_SMCCC_CALL_VAL(call, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_SIP, \
++			   (((svc) & 0xff) << 8) | ((cmd) & 0xff))
++#define SCM_BOOT_SET_ADDR_MC	SCM_SMC32(0x01, 0x11, ARM_SMCCC_STD_CALL)
++#define SCM_IO_READ		SCM_SMC32(0x05, 0x01, ARM_SMCCC_FAST_CALL)
++#define SCM_IO_WRITE		SCM_SMC32(0x05, 0x02, ARM_SMCCC_FAST_CALL)
+ #define RELEASE_OFFSET		0x88
+ 
+-static unsigned int cpus = 0x0e;
++static unsigned int cpus = 0xfe;
+ module_param(cpus, uint, 0444);
+-MODULE_PARM_DESC(cpus, "Mask of CPUs to power up (A53 cluster only: 0x0e)");
++MODULE_PARM_DESC(cpus, "Mask of CPUs to power up (0x0e: A53 cluster, 0xf0: A57 cluster)");
++
++static int msm8994_scm_io_readl(u32 addr, u32 *val)
++{
++	struct arm_smccc_res res;
++
++	arm_smccc_smc(SCM_IO_READ, 1, addr, 0, 0, 0, 0, 0, &res);
++	if ((long)res.a0)
++		return -EIO;
++	*val = res.a1;
++	return 0;
++}
++
++static int msm8994_scm_io_writel(u32 addr, u32 val)
++{
++	struct arm_smccc_res res;
++
++	arm_smccc_smc(SCM_IO_WRITE, 2, addr, val, 0, 0, 0, 0, &res);
++	return (long)res.a0 ? -EIO : 0;
++}
++
++/*
++ * SET_ADDR_MC: entry, the CPU, cluster and SoC masks (all), flags. Beyond the
++ * third, the arguments go in a buffer (32-bit each) whose address is in x5.
++ */
++static int msm8994_scm_set_boot_addr(u32 entry)
++{
++	struct arm_smccc_res res;
++	__le32 *ext;
++
++	ext = kzalloc(SZ_64, GFP_KERNEL);
++	if (!ext)
++		return -ENOMEM;
++	ext[0] = cpu_to_le32(~0U);
++	ext[1] = cpu_to_le32(~0U);
++	ext[2] = cpu_to_le32(SCM_BOOT_MC_FLAGS);
++	dcache_clean_poc((unsigned long)ext, (unsigned long)ext + SZ_64);
++	arm_smccc_smc(SCM_BOOT_SET_ADDR_MC, 6, entry, ~0U, ~0U, virt_to_phys(ext),
++		      0, 0, &res);
++	kfree(ext);
++	return (long)res.a0 ? -EIO : 0;
++}
++
++/*
++ * Bits 4:1 of the mux register: lf mux (bits 2:1) 3 = auxiliary clock (GPLL0,
++ * 600 MHz), hf mux (bits 4:3) 0 = lf mux. Reset value 0 runs the cluster
++ * from XO.
++ */
++static int a57_mux = 0x3;
++module_param(a57_mux, int, 0444);
++MODULE_PARM_DESC(a57_mux, "Value for the A57 clock mux bits 4:1 (-1: leave as is)");
+ 
+ /* wfe; ldr x30, [pc, #0x84] (release address at 0x88); cbz x30, 0; br x30 */
+ static const u32 spin_code[] = { 0xd503205f, 0x5800043e, 0xb4ffffde, 0xd61f03c0 };
+ 
+-static void msm8994_ldo_config(unsigned int cpu)
++static void msm8994_ldo_config(unsigned int cpu, u32 vref_ret)
+ {
+ 	void __iomem *ldo = ioremap(LDO_BASE(cpu), SZ_4K);
+ 	u32 val;
+@@ -73,7 +157,7 @@ static void msm8994_ldo_config(unsigned int cpu)
+ 	val = readl_relaxed(ldo + APC_LDO_VREF_CFG);
+ 	writel_relaxed(val & ~BIT(16), ldo + APC_LDO_VREF_CFG);
+ 	val = readl_relaxed(ldo + APC_LDO_VREF_CFG);
+-	writel_relaxed((val & 0xffff80ff) | (LDO_VREF_RET << 8), ldo + APC_LDO_VREF_CFG);
++	writel_relaxed((val & 0xffff80ff) | (vref_ret << 8), ldo + APC_LDO_VREF_CFG);
+ 	writel_relaxed(0x0, ldo);
+ 	writel_relaxed(0x1, ldo);
+ 	mb();
+@@ -115,10 +199,81 @@ static int msm8994_unclamp_cpu(unsigned int cpu)
+ 	mb();
+ 	iounmap(acc);
+ 
+-	ret = qcom_scm_io_readl(L2_PWR_SEC_REG, &val);
++	ret = msm8994_scm_io_readl(L2_PWR_SEC_REG, &val);
+ 	if (ret)
+ 		return ret;
+-	return qcom_scm_io_writel(L2_PWR_SEC_REG, val & ~BIT(0));
++	return msm8994_scm_io_writel(L2_PWR_SEC_REG, val & ~BIT(0));
++}
++
++/* power_on_l2_msm8994() and msm_spm_turn_on_cpu_rail() of the downstream kernel */
++static int msm8994_a57_l2_on(void)
++{
++	void __iomem *l2 = ioremap(A57_L2CCC_BASE, SZ_4K);
++	void __iomem *saw;
++	u32 val;
++
++	if (!l2)
++		return -ENOMEM;
++	val = readl_relaxed(l2 + L2_PWR_CTL);
++	pr_info("msm8994-cpu-boot: A57 L2_PWR_CTL %#x, clock mux %#x\n",
++		val, readl_relaxed(l2 + CLK_MUX));
++	if ((val & L2_PWR_ON_MASK) == L2_PWR_ON_MASK)
++		goto mux;
++
++	saw = ioremap(A57_SAW_BASE, SZ_4K);
++	if (!saw) {
++		iounmap(l2);
++		return -ENOMEM;
++	}
++	/* Q2S: ignore Q-channel requests, no SPM legacy mode */
++	writel_relaxed(0x2, l2 + Q2S_CTL);
++	mb();
++	/* Set the rail's voltage, then enable it */
++	writel_relaxed(A57_VCTL_VAL, saw + SAW_VCTL);
++	mb();
++	udelay(2000);
++	writel_relaxed(0x30080, saw + SAW_VCTL);
++	mb();
++	udelay(2000);
++	iounmap(saw);
++
++	writel_relaxed(0x00000000, l2 + L1_RST_DIS);	/* L1 invalidation by hw */
++	mb();
++	writel_relaxed(0x00400000, l2 + L2_PWR_CTL_OVERRIDE);	/* PRESETDBGn */
++	mb();
++	writel_relaxed(0x00029716, l2 + L2_PWR_CTL);	/* close GDHS, power up */
++	mb();
++	udelay(8);
++	writel_relaxed(0x00023716, l2 + L2_PWR_CTL);	/* memory clamp off */
++	mb();
++	writel_relaxed(0x0002371e, l2 + L2_PWR_CTL);	/* RAMs out of sleep */
++	mb();
++	udelay(8);
++	writel_relaxed(0x0002371c, l2 + L2_PWR_CTL);	/* clock on */
++	mb();
++	udelay(4);
++	writel_relaxed(0x0002361c, l2 + L2_PWR_CTL);	/* logic clamp off */
++	mb();
++	udelay(2);
++	writel_relaxed(0x00022218, l2 + L2_PWR_CTL);	/* logic reset off */
++	mb();
++	udelay(4);
++	writel_relaxed(0x10022218, l2 + L2_PWR_CTL);	/* PMIC_APC on */
++	mb();
++	writel_relaxed(0x00000000, l2 + L2_PWR_CTL_OVERRIDE);
++	mb();
++	pr_info("msm8994-cpu-boot: A57 L2 powered up\n");
++mux:
++	if (a57_mux >= 0) {
++		val = readl_relaxed(l2 + CLK_MUX);
++		writel_relaxed((val & ~GENMASK(4, 1)) | ((a57_mux << 1) & GENMASK(4, 1)),
++			       l2 + CLK_MUX);
++		mb();
++		udelay(5);
++		pr_info("msm8994-cpu-boot: A57 clock mux %#x\n", readl_relaxed(l2 + CLK_MUX));
++	}
++	iounmap(l2);
++	return 0;
+ }
+ 
+ static int __init msm8994_cpu_boot_init(void)
+@@ -131,10 +286,8 @@ static int __init msm8994_cpu_boot_init(void)
+ 
+ 	if (!of_machine_is_compatible("qcom,msm8994"))
+ 		return -ENODEV;
+-	if (!qcom_scm_is_available())
+-		return -EPROBE_DEFER;
+-	if (cpus & ~0x0eU) {
+-		pr_err("msm8994-cpu-boot: only CPU1-3 (A53 cluster) are supported\n");
++	if (cpus & ~0xfeU) {
++		pr_err("msm8994-cpu-boot: only CPU1-7 can be powered up\n");
+ 		return -EINVAL;
+ 	}
+ 
+@@ -155,27 +308,33 @@ static int __init msm8994_cpu_boot_init(void)
+ 	mb();
+ 	iounmap(page);
+ 
+-	ret = qcom_scm_set_boot_addr_mc_phys(res.start, SCM_BOOT_MC_FLAGS);
++	ret = msm8994_scm_set_boot_addr(res.start);
+ 	if (ret) {
+ 		pr_err("msm8994-cpu-boot: setting the boot address failed: %d\n", ret);
+ 		return ret;
+ 	}
+ 
+-	msm8994_ldo_config(0);
+-	for (cpu = 1; cpu < 4; cpu++) {
+-		if (!(cpus & BIT(cpu)))
++	msm8994_ldo_config(0, LDO_VREF_RET_A53);
++	if (cpus & 0xf0) {
++		ret = msm8994_a57_l2_on();
++		if (ret) {
++			pr_err("msm8994-cpu-boot: A57 L2 power-up failed: %d\n", ret);
++			cpus &= 0x0f;
++		}
++	}
++	for (cpu = 1; cpu < 8; cpu++) {
++		if (!(cpus & BIT(cpu)) || !cpu_possible(cpu) || cpu_online(cpu))
+ 			continue;
+ 		ret = msm8994_unclamp_cpu(cpu);
+ 		if (ret) {
+ 			pr_err("msm8994-cpu-boot: CPU%u power-up failed: %d\n", cpu, ret);
+ 			continue;
+ 		}
+-		msm8994_ldo_config(cpu);
+-		pr_info("msm8994-cpu-boot: CPU%u powered up; it waits in the holding pen\n", cpu);
++		msm8994_ldo_config(cpu, cpu < 4 ? LDO_VREF_RET_A53 : LDO_VREF_RET_A57);
++		pr_info("msm8994-cpu-boot: CPU%u powered up\n", cpu);
+ 	}
+ 	return 0;
+ }
+-module_init(msm8994_cpu_boot_init);
+ 
+-MODULE_DESCRIPTION("MSM8994 secondary CPU power-up for the spin-table enable method");
+-MODULE_LICENSE("GPL");
++/* After smp_prepare_cpus() (the release address is set), before smp_init() */
++early_initcall(msm8994_cpu_boot_init);

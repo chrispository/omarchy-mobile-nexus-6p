@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 08:26:17 -0600
+Subject: [PATCH 15/15] soc: qcom: msm8994-cpu-boot: Default to the A53 cluster
+
+Without CPU idle states (no PSCI, no SPM power collapse yet) the A57
+cores idle in WFI at full clock: on the Nexus 6P the battery's charge
+current on a USB data port fell from about 170 mA to about 6 mA with
+all eight cores up. Power up the A53 cluster by default; cpus=0xfe on
+the command line adds the A57 cluster.
+
+Mark the CPUs it leaves unpowered as not present, so smp_init() does not
+wait five seconds for each of them.
+---
+ drivers/soc/qcom/msm8994-cpu-boot.c | 17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/soc/qcom/msm8994-cpu-boot.c b/drivers/soc/qcom/msm8994-cpu-boot.c
+index 8c53eb63b..edb28c165 100644
+--- a/drivers/soc/qcom/msm8994-cpu-boot.c
++++ b/drivers/soc/qcom/msm8994-cpu-boot.c
+@@ -79,9 +79,14 @@
+ #define SCM_IO_WRITE		SCM_SMC32(0x05, 0x02, ARM_SMCCC_FAST_CALL)
+ #define RELEASE_OFFSET		0x88
+ 
+-static unsigned int cpus = 0xfe;
++/*
++ * The A53 cluster by default: without CPU idle states (no PSCI, and no SPM
++ * power collapse here) the A57 cores idle in WFI at full clock, which costs
++ * about 165 mA, all a USB data port's 500 mA leaves the battery.
++ */
++static unsigned int cpus = 0x0e;
+ module_param(cpus, uint, 0444);
+-MODULE_PARM_DESC(cpus, "Mask of CPUs to power up (0x0e: A53 cluster, 0xf0: A57 cluster)");
++MODULE_PARM_DESC(cpus, "Mask of CPUs to power up (0x0e: A53 cluster, 0xfe: both clusters)");
+ 
+ static int msm8994_scm_io_readl(u32 addr, u32 *val)
+ {
+@@ -323,11 +328,17 @@ static int __init msm8994_cpu_boot_init(void)
+ 		}
+ 	}
+ 	for (cpu = 1; cpu < 8; cpu++) {
+-		if (!(cpus & BIT(cpu)) || !cpu_possible(cpu) || cpu_online(cpu))
++		if (!cpu_present(cpu) || cpu_online(cpu))
+ 			continue;
++		/* smp_init() brings up present CPUs only: skip the unpowered ones */
++		if (!(cpus & BIT(cpu))) {
++			set_cpu_present(cpu, false);
++			continue;
++		}
+ 		ret = msm8994_unclamp_cpu(cpu);
+ 		if (ret) {
+ 			pr_err("msm8994-cpu-boot: CPU%u power-up failed: %d\n", cpu, ret);
++			set_cpu_present(cpu, false);
+ 			continue;
+ 		}
+ 		msm8994_ldo_config(cpu, cpu < 4 ? LDO_VREF_RET_A53 : LDO_VREF_RET_A57);

@@ -412,4 +412,25 @@ image, so the phone comes back to Linux with SSH.
   (off; the A53 L2 reads 0x90022218), clock mux (`0xf900f054`) 0 (XO), SAW
   `VCTL` 0. The driver now turns on the rail (`0xb8`, angler's
   `qcom,vctl-val`), powers up the L2 and selects GPLL0 (600 MHz) for the
-  cluster, for `cpus=0xf0`. Next: that test.
+  cluster, for `cpus=0xf0`.
+- **A57 onlined late: refused.** The rail, L2 (`PWR_CTL` then 0x90022218)
+  and mux (GPLL0) came up and CPU4 ran kernel code, but arm64 refused it:
+  `CPU features: CPU4: Detected conflict for capability 82 (Spectre-v2)`
+  (the A53-only boot never set up the A57's errata and mitigations).
+- **So the cores now come up before `smp_init()`:** the driver is built in
+  as an early initcall and makes its two SCM calls itself (SMC32), and
+  `maxcpus=1` is gone. All eight booted: `CPU4: Booted secondary processor
+  0x0000000100 [0x411fd071]` (A57 r1p1), with errata 1742098, 832075 and
+  1319367 and the Spectre mitigations detected at boot. A pinned hash loop
+  on each core ran about the same speed on all eight (A57 at 600 MHz). The
+  arm64 hotplug patch is dropped: nothing onlines late any more.
+- **But the idle A57s ate the charge:** net battery current went from about
+  170 mA (four cores) to about 6 mA, idle. No CPU idle states means WFI at
+  full clock. The default is the A53 cluster again (`cpus=0xfe` on the
+  cmdline adds the A57s), and unpowered CPUs are marked not present so
+  boot doesn't wait 5 s for each. omamobile-device-angler 0.1.5 drops
+  `omamobile-cpus.service`. Next for the A57s: SPM power collapse in idle,
+  or a lower A57 clock and voltage.
+- **qcom_fg's `Failed to register battery`** was a probe deferral (it
+  registers on the retry); `dev_err_probe()` now keeps it quiet. Its
+  `sram_requests=-1` warning came once, around that failed first probe.

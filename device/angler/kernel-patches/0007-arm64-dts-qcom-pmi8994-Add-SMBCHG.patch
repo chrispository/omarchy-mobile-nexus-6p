@@ -1,7 +1,7 @@
-From f6ec55ca636ff269f00f239ac21d59157d057bdf Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yassine Oudjana <y.oudjana@protonmail.com>
 Date: Thu, 15 Jul 2021 09:19:40 +0400
-Subject: [PATCH 07/13] arm64: dts: qcom: pmi8994: Add SMBCHG
+Subject: [PATCH 07/15] arm64: dts: qcom: pmi8994: Add SMBCHG
 
 Add a node for the switch-mode battery charger available on
 this PMIC.
@@ -96,6 +96,3 @@ index 9ee59e6d2..c7b8ee8ef 100644
  		pmi8994_gpios: gpio@c000 {
  			compatible = "qcom,pmi8994-gpio", "qcom,spmi-gpio";
  			reg = <0xc000>;
--- 
-2.56.0
-

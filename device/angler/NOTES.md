@@ -13,14 +13,20 @@ angler-03.78), with the reason for each. Plan and results:
   `image_size`, BSS included). The bootloader puts the DTB there, and a bigger
   kernel overwrites it and hangs on the Google logo. `build-n1` checks this.
 - **No PSCI:** the stock TZ's `CPU_ON` returns -22, and lk2nd has no msm8994
-  CPU power-up either. The kernel boots `maxcpus=1` with every CPU on
-  `spin-table` (release address in a reserved page at `0x062ff000`), and
-  `msm8994-cpu-boot.ko` sets the cores' boot address through SCM
-  (`SET_ADDR_MC`, SMC32) and powers them up with Google's downstream
-  sequence (`cpu_pwr_ctl.c`). An arm64 patch lets a CPU left offline at boot
-  be onlined later; `omamobile-cpus.service` does it. CPU1-3 (A53) work. The
-  A57 cluster also needs its rail (L2 SAW `VCTL`), its L2 and a clock: its
-  mux resets to XO.
+  CPU power-up either. Every CPU uses `spin-table` (release address at 0x88
+  of a reserved page at `0x062ff000`). `msm8994-cpu-boot` (built in, an early
+  initcall between `smp_prepare_cpus()` and `smp_init()`) sets the cores'
+  boot address with a raw SCM call (`SET_ADDR_MC`, SMC32: SCM hasn't probed
+  yet) and powers them up with Google's downstream sequence
+  (`cpu_pwr_ctl.c`). They must be up before `smp_init()`: an A57 onlined
+  later from an A53-only system is refused (`Detected conflict for
+  capability 82 (Spectre-v2)`), since its errata weren't set up at boot.
+- **The A57 cluster** needs its rail (L2 SAW `VCTL` 0xb8), its L2 and a
+  clock (its mux resets to XO; the driver picks GPLL0, 600 MHz). It works
+  (`msm8994_cpu_boot.cpus=0xfe`), but with no CPU idle states the four A57s
+  idle in WFI at full clock and cost about 165 mA, which stalls charging on a
+  500 mA USB port. The default is the A53 cluster until there's power
+  collapse or A57 cpufreq.
 - **lk2nd** needs this phone's board id (`lk2nd-patches/`); `fastboot boot
   lk2nd.img` works, but our kernel booted through it hung. Not needed now.
 - **The bootloader appends the serial number and Wi-Fi/BT MACs to the

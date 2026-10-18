@@ -1,7 +1,7 @@
-From b7570f668aa9ea8b75ae5f87c646c44a1057747b Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yassine Oudjana <y.oudjana@protonmail.com>
 Date: Sat, 6 Mar 2021 13:33:43 +0400
-Subject: [PATCH 10/13] arm64: dts: qcom: pmi8994: Add fuel gauge
+Subject: [PATCH 10/15] arm64: dts: qcom: pmi8994: Add fuel gauge
 
 Add a node for qcom,pmi8994-fg.
 
@@ -35,6 +35,3 @@ index c7b8ee8ef..972540232 100644
  		pmi8994_gpios: gpio@c000 {
  			compatible = "qcom,pmi8994-gpio", "qcom,spmi-gpio";
  			reg = <0xc000>;
--- 
-2.56.0
-

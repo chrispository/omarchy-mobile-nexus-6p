@@ -1,7 +1,7 @@
-From 45b74f5e0c715afcab66e26c8fa495f70076dbf6 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yassine Oudjana <y.oudjana@protonmail.com>
 Date: Sun, 7 Aug 2022 20:14:34 +0100
-Subject: [PATCH 05/13] util_macros.h: Add macro to find closest smaller value
+Subject: [PATCH 05/15] util_macros.h: Add macro to find closest smaller value
  in array
 
 Add a macro to find the value closest to but smaller than a given
@@ -47,6 +47,3 @@ index 71564868b..0fcd24395 100644
  /**
   * PTR_IF - evaluate to @ptr if @cond is true, or to NULL otherwise.
   * @cond: A conditional, usually in a form of IS_ENABLED(CONFIG_FOO)
--- 
-2.56.0
-

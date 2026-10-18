@@ -1,7 +1,7 @@
-From 0ea1d73d63ccd2cab5ee35789bdc92574158b1ce Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: chris <08a487@gmail.com>
 Date: Sun, 18 Oct 2026 05:45:24 -0600
-Subject: [PATCH 12/13] soc: qcom: Add MSM8994 secondary CPU power-up for
+Subject: [PATCH 12/15] soc: qcom: Add MSM8994 secondary CPU power-up for
  spin-table
 
 The TZ firmware of the Huawei Nexus 6P (MSM8994) has no PSCI, so only the
@@ -287,6 +287,3 @@ index 5747bd191..f70a80c8c 100644
  int qcom_scm_set_warm_boot_addr(void *entry);
  void qcom_scm_cpu_power_down(u32 flags);
  int qcom_scm_set_remote_state(u32 state, u32 id);
--- 
-2.56.0
-

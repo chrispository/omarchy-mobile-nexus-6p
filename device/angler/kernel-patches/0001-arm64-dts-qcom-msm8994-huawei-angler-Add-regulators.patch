@@ -1,7 +1,7 @@
-From 01afaa3f8a045ad310999bdbf79dc888945a1c05 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Petr Vorel <petr.vorel@gmail.com>
 Date: Thu, 27 Jan 2022 00:26:54 +0100
-Subject: [PATCH 01/13] arm64: dts: qcom: msm8994-huawei-angler: Add regulators
+Subject: [PATCH 01/15] arm64: dts: qcom: msm8994-huawei-angler: Add regulators
 
 Signed-off-by: Petr Vorel <petr.vorel@gmail.com>
 Link: https://lore.kernel.org/linux-arm-msm/20230203122118.15219-1-pvorel@suse.cz/
@@ -287,6 +287,3 @@ index 7775532f1..bd777463f 100644
  &sdhc1 {
  	status = "okay";
  	mmc-hs400-1_8v;
--- 
-2.56.0
-
