@@ -13,7 +13,10 @@ angler-03.78), with the reason for each. Plan and results:
   `image_size`, BSS included). The bootloader puts the DTB there, and a bigger
   kernel overwrites it and hangs on the Google logo. `build-n1` checks this.
 - **Only CPU0 comes up:** the stock TZ has no real PSCI (`CPU_ON` returns -22).
-  SMP needs lk2nd.
+  SMP needs lk2nd's spin table (kernel DT: a `spin-table@` reserved page).
+  lk2nd needs this phone's board id added (`lk2nd-patches/`); `fastboot boot
+  lk2nd.img` works, but our first kernel boot through it hung, with no
+  watchdog to reset it. Don't try it unattended.
 - **The bootloader appends the serial number and Wi-Fi/BT MACs to the
   cmdline:** never commit `/proc/cmdline` or the top of `dmesg`.
 - **The container's `mkbootimg` is broken** (no `gki` module): use the host's.

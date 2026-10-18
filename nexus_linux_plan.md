@@ -311,3 +311,24 @@ handheld. Telephony needs separate evidence before calling it a phone.
   the msm DRM driver for the panel and the Adreno 430 for real rendering;
   SMP; battery, charging and Wi-Fi.
 
+### 2026-10-18 (night): N4a, SMP through lk2nd: first try hangs
+
+- **lk2nd builds and runs from RAM.** lk2nd `b9c4f7f` plus
+  `device/angler/lk2nd-patches/` (this phone's board id 0x1f57), target
+  `lk2nd-msm8994` (sha256 `bc0f614e…7c1a`). From fastboot, `fastboot boot
+  lk2nd.img` starts it, and it answers as `product: lk2nd-msm8994`,
+  `version: 0.5`. Nothing was flashed.
+- **Booting our image through it hung.** `fastboot boot angler-n1.img` to
+  lk2nd (kernel DT with `spin-table@62ff000` reserved, `enable-method = "psci"`
+  for lk2nd to rewrite) left lk2nd's screen up and its USB device enumerated,
+  but every fastboot command hung, and no Linux gadget ever appeared: lk2nd
+  froze starting the kernel, or the kernel hung before its USB driver and
+  before init arms the watchdog. No watchdog reset came, so the phone needs a
+  long Power press.
+- **Next, one question per boot:** (1) `fastboot oem log` on a fresh lk2nd
+  for its view of the image; (2) the same image with SMP skipped (any custom
+  `enable-method` makes lk2nd leave the CPUs alone), to see whether lk2nd can
+  start our kernel at all; (3) an lk2nd built with `DEBUG_FBCON=1`, to read
+  its log on the panel by webcam; (4) then SMP with ramoops read back through
+  `fastboot oem ramoops raw`.
+

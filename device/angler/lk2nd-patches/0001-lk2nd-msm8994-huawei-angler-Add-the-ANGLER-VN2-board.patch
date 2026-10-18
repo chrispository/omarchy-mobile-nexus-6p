@@ -1,0 +1,28 @@
+From 5388018d5aa60aec51bb3d82f22e27a7b336c92c Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 05:02:35 -0600
+Subject: [PATCH] lk2nd: msm8994-huawei-angler: Add the ANGLER-VN2 board id
+
+The VN2 hardware revision (fastboot getvar hardware-revision ANGLER-VN2)
+reports board id 0x1f57, so the stock bootloader found no DTB in lk2nd.img
+for it.
+---
+ lk2nd/device/dts/msm8994/msm8994-huawei-angler.dts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lk2nd/device/dts/msm8994/msm8994-huawei-angler.dts b/lk2nd/device/dts/msm8994/msm8994-huawei-angler.dts
+index 94d96b5..b4f3ac3 100644
+--- a/lk2nd/device/dts/msm8994/msm8994-huawei-angler.dts
++++ b/lk2nd/device/dts/msm8994/msm8994-huawei-angler.dts
+@@ -5,7 +5,7 @@
+ 
+ / {
+ 	qcom,msm-id = <QCOM_ID_MSM8994 0>;
+-	qcom,board-id = <8026 0>;
++	qcom,board-id = <8026 0>, <0x1f57 0>;	/* 0x1f57: ANGLER-VN2 */
+ 	qcom,pmic-id = <0x10009 0x1000a 0x00 0x00>;
+ };
+ 
+-- 
+2.56.0
+
