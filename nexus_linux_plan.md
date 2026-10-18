@@ -1,9 +1,10 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Nexus 6P Linux and Omarchy Mobile feasibility plan
 
-**Status (2026-10-18): N1 passes.** The test handset is unlocked and boots
-mainline Linux from RAM (`fastboot boot`) to an SSH shell over USB, on one CPU
-with no storage access. See the results at the end. No device support is
+**Status (2026-10-18): N1 passes; N2a (text console) passes.** The test
+handset is unlocked and boots mainline Linux from RAM (`fastboot boot`) to an
+SSH shell over USB, on one CPU with no storage access, with a kernel console
+on the panel through the bootloader's framebuffer. See the results at the end. No device support is
 claimed. Proposed kernel branch: `omamobile-angler-boot`; proposed worktree:
 `~/android/mainline/wt-angler-boot`; proposed output:
 `~/android/mainline/out-angler-boot`. These are reserved names, not existing
@@ -231,6 +232,22 @@ human's approval. Unknown device details are a stop condition.
 - **Bootloader cmdline:** the stock bootloader appends the serial number and
   Wi-Fi/Bluetooth MAC addresses to the kernel command line. Never paste
   `/proc/cmdline` or the top of `dmesg` from this phone into the repository.
+
+### 2026-10-18: N2a, text console on the bootloader's framebuffer
+
+- **Pass (bootloader framebuffer only, not the N2 gate).**
+  `7.3.0-rc7-angler-n1+`, image sha256 `ddc13131…fe54`. simplefb on the splash
+  buffer (`0x03400000`, 1440x2560 `r8g8b8`) with fbcon in Terminus 16x32
+  (90x80 characters); kernel messages are readable on the panel.
+- The panel is command mode and nothing drives MDSS, so `fbkick loop 10` in
+  the initramfs writes CTL0/CTL1 `START` to send each frame. Before that,
+  `fbkick pattern` drew colour bars that showed in the expected order, which
+  confirms the B, G, R byte order. The register map and quirks are in
+  [device/angler/NOTES.md](device/angler/NOTES.md).
+- The bootloader appends `console=NULL` after our `console=tty0`; kernel
+  messages still reach fbcon.
+- Next for N2: mainline MDSS/DSI with a panel driver for real DRM, then touch,
+  then Adreno 430.
 
 For each run, append the date, gate, kernel release
 (`uname -r`), kernel commit, DTB/image hashes, package versions, expected and

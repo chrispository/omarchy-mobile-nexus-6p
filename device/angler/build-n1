@@ -18,7 +18,7 @@ WORK="${WORK:-$HOME/android}"
 KERNEL_DIR="${KERNEL_DIR:-$WORK/mainline/linux-angler}"
 KERNEL_OUT="${KERNEL_OUT:-$WORK/mainline/out-angler-boot}"
 BOARD_ID="${BOARD_ID:-0x1f57}"
-CMDLINE="${CMDLINE:-maxcpus=4 panic=10 clk_ignore_unused pd_ignore_unused loglevel=7 rdinit=/init}"
+CMDLINE="${CMDLINE:-maxcpus=4 panic=10 clk_ignore_unused pd_ignore_unused loglevel=7 console=tty0 fbcon=font:TER16x32 consoleblank=0 rdinit=/init}"
 IMAGE=angler-build:24.04
 DTB=qcom/msm8994-huawei-angler-rev-101.dtb
 # The bootloader unpacks the kernel at 0x8000 and puts the DTB at 0x01e00000:
@@ -49,6 +49,22 @@ in_container "
   make ARCH=arm64 LLVM=1 O=$KERNEL_OUT -j\$(nproc) Image.gz $DTB
   cp $KERNEL_OUT/arch/arm64/boot/dts/$DTB $KERNEL_OUT/angler.dtb
   fdtput -t i $KERNEL_OUT/angler.dtb / qcom,board-id $BOARD_ID 0
+  # The bootloader's splash buffer as a simplefb (N2): 1440x2560 RGB888 at
+  # 0x03400000, covered by the DTS's no-map dfps-data and cont_splash_mem
+  fb=/chosen/framebuffer@3400000
+  fdtput -t i $KERNEL_OUT/angler.dtb /chosen '#address-cells' 2
+  fdtput -t i $KERNEL_OUT/angler.dtb /chosen '#size-cells' 2
+  fdtput $KERNEL_OUT/angler.dtb /chosen ranges
+  fdtput -c $KERNEL_OUT/angler.dtb \$fb
+  fdtput -t s $KERNEL_OUT/angler.dtb \$fb compatible simple-framebuffer
+  fdtput -t x $KERNEL_OUT/angler.dtb \$fb reg 0 0x03400000 0 0x00a8c000
+  fdtput -t i $KERNEL_OUT/angler.dtb \$fb width 1440
+  fdtput -t i $KERNEL_OUT/angler.dtb \$fb height 2560
+  fdtput -t i $KERNEL_OUT/angler.dtb \$fb stride 4320
+  fdtput -t s $KERNEL_OUT/angler.dtb \$fb format r8g8b8
+  fdtput -t s $KERNEL_OUT/angler.dtb \$fb status okay
+  aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/fbkick $DEV/tools/fbkick.c
+  aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/peek $DEV/tools/peek.c
 "
 # The fragment must have survived olddefconfig (a missing dependency drops a
 # symbol silently)
@@ -83,6 +99,7 @@ done
 [[ -e $stage/usr/sbin/udhcpd ]] || ln -s /bin/busybox-extras "$stage/usr/sbin/udhcpd"
 [[ -x $stage/usr/sbin/dropbear ]] || die "the initramfs has no dropbear"
 install -m 755 "$DEV/initramfs/init" "$stage/init"
+install -m 755 "$KERNEL_OUT/fbkick" "$KERNEL_OUT/peek" "$stage/usr/bin/"
 mkdir -p "$stage/root/.ssh"
 cat "$HOME"/.ssh/*.pub > "$stage/root/.ssh/authorized_keys"
 chmod 700 "$stage/root/.ssh" && chmod 600 "$stage/root/.ssh/authorized_keys"

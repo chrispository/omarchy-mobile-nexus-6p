@@ -15,6 +15,11 @@ mount -t tmpfs tmpfs /run
 
 say() { echo "omamobile: $*" > /dev/kmsg; }
 
+# Display (N2): the panel is command mode and nothing drives MDSS, so push
+# the simplefb console out a few times a second. fbkick refuses to write
+# unless MDSS still holds the bootloader's splash setup.
+fbkick loop 10 &
+
 # --- eMMC safety: every mmcblk device is read-only, and nothing is mounted ---
 # The N1 kernel has no eMMC driver, so there should be nothing to guard. This
 # is the second line of defence for when the driver is enabled: every eMMC
