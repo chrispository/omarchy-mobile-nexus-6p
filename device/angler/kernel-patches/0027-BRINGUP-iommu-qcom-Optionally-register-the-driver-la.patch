@@ -1,0 +1,83 @@
+From 8e29428a0546fe37e4ec72929e4a5d0e11dc7a52 Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 15:21:42 -0600
+Subject: [PATCH 27/28] BRINGUP: iommu/qcom: Optionally register the driver
+ late
+
+Not for upstream. On MSM8994 the GPU SMMU's probe crashed the phone
+before USB was up, and the bootloader clears the RAM ramoops uses, so
+nothing of the crash survived. qcom_iommu.late=1 skips the
+registration at boot; writing 1 to
+/sys/module/qcom_iommu/parameters/register does it once a log stream
+(netconsole) is running.
+
+Assisted-by: Claude Opus 5.5
+---
+ drivers/iommu/arm/arm-smmu/qcom_iommu.c | 46 ++++++++++++++++++++++++-
+ 1 file changed, 45 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+index ef2cf87ba..562698093 100644
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -939,7 +939,7 @@ static struct platform_driver qcom_iommu_driver = {
+ 	.remove = qcom_iommu_device_remove,
+ };
+ 
+-static int __init qcom_iommu_init(void)
++static int qcom_iommu_register(void)
+ {
+ 	int ret;
+ 
+@@ -953,4 +953,48 @@ static int __init qcom_iommu_init(void)
+ 
+ 	return ret;
+ }
++
++/*
++ * BRINGUP (angler, not for upstream): qcom_iommu.late=1 skips registration
++ * at boot; writing 1 to /sys/module/qcom_iommu/parameters/register does it
++ * later, once a log stream is up, so a crash in probe can be read.
++ */
++static bool late;
++module_param(late, bool, 0444);
++static DEFINE_MUTEX(late_lock);
++static bool registered;
++
++static int late_register_set(const char *val, const struct kernel_param *kp)
++{
++	bool now;
++	int ret;
++
++	ret = kstrtobool(val, &now);
++	if (ret || !now)
++		return ret;
++
++	guard(mutex)(&late_lock);
++	if (registered)
++		return 0;
++	pr_info("qcom_iommu: registering now\n");
++	ret = qcom_iommu_register();
++	registered = !ret;
++	return ret;
++}
++
++static const struct kernel_param_ops late_register_ops = {
++	.set = late_register_set,
++};
++module_param_cb(register, &late_register_ops, NULL, 0200);
++
++static int __init qcom_iommu_init(void)
++{
++	if (late) {
++		pr_info("qcom_iommu: registration deferred (qcom_iommu.late=1)\n");
++		return 0;
++	}
++
++	registered = true;
++	return qcom_iommu_register();
++}
+ device_initcall(qcom_iommu_init);
+-- 
+2.56.0
+

@@ -1,0 +1,125 @@
+From 6a78a54108c800ad4aff4cf21304b46105efd86e Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 14:34:28 -0600
+Subject: [PATCH 25/28] power: supply: qcom_fg: Set up SRAM access before
+ registering the battery
+
+Registering the battery supply also registers its thermal zone, and
+the thermal core reads the temperature straight away, through the
+SRAM. The completions, locks and request count the SRAM access uses
+were set up only after that, so an early read waited on an
+uninitialized completion. On a Nexus 6P that oopsed in
+wait_for_common() from the thermal_events workqueue, and on other
+boots it set off the "sram_requests cannot be negative" warning.
+
+Set the SRAM state up first, initialize the locks before the
+mem-avail interrupt can fire, and make the workqueue device-managed:
+a probe deferred at the supply registration now comes after it, and
+would otherwise leak it.
+
+Assisted-by: Claude Opus 5.5
+---
+ drivers/power/supply/qcom_fg.c | 57 ++++++++++++++++------------------
+ 1 file changed, 26 insertions(+), 31 deletions(-)
+
+diff --git a/drivers/power/supply/qcom_fg.c b/drivers/power/supply/qcom_fg.c
+index 267e27e2a..84cc483d7 100644
+--- a/drivers/power/supply/qcom_fg.c
++++ b/drivers/power/supply/qcom_fg.c
+@@ -1137,24 +1137,10 @@ static int qcom_fg_probe(struct platform_device *pdev)
+ 		return ret;
+ 	}
+ 
+-	supply_config.drv_data = chip;
+-	supply_config.fwnode = dev_fwnode(&pdev->dev);
+-
+-	chip->batt_psy = devm_power_supply_register(chip->dev,
+-			&batt_psy_desc, &supply_config);
+-	if (IS_ERR(chip->batt_psy))
+-		return dev_err_probe(&pdev->dev, PTR_ERR(chip->batt_psy),
+-				     "Failed to register battery\n");
+-
+-	platform_set_drvdata(pdev, chip);
+-
+-	ret = power_supply_get_battery_info(chip->batt_psy, &chip->batt_info);
+-	if (ret) {
+-		dev_err(&pdev->dev, "Failed to get battery info: %d\n", ret);
+-		return ret;
+-	}
+-
+-	/* Initialize SRAM if available */
++	/*
++	 * Initialize SRAM if available, before the battery supply: registering
++	 * it creates a thermal zone that reads the temperature through SRAM.
++	 */
+ 	if (chip->sram_regs) {
+ 		irq = of_irq_get_byname(pdev->dev.of_node, "mem-avail");
+ 		if (irq < 0) {
+@@ -1165,8 +1151,13 @@ static int qcom_fg_probe(struct platform_device *pdev)
+ 
+ 		init_completion(&chip->sram_access_granted);
+ 		init_completion(&chip->sram_access_revoked);
++		spin_lock_init(&chip->sram_request_lock);
++		spin_lock_init(&chip->sram_rw_lock);
++		chip->sram_requests = 0;
+ 
+-		chip->sram_wq = create_singlethread_workqueue("qcom_fg");
++		chip->sram_wq = devm_alloc_ordered_workqueue(chip->dev, "qcom_fg", 0);
++		if (!chip->sram_wq)
++			return -ENOMEM;
+ 		INIT_DELAYED_WORK(&chip->sram_release_access_work,
+ 			qcom_fg_sram_release_access_worker);
+ 
+@@ -1177,10 +1168,23 @@ static int qcom_fg_probe(struct platform_device *pdev)
+ 			dev_err(&pdev->dev, "Failed to request mem-avail IRQ: %d\n", ret);
+ 			return ret;
+ 		}
++	}
+ 
+-		spin_lock_init(&chip->sram_request_lock);
+-		spin_lock_init(&chip->sram_rw_lock);
+-		chip->sram_requests = 0;
++	supply_config.drv_data = chip;
++	supply_config.fwnode = dev_fwnode(&pdev->dev);
++
++	chip->batt_psy = devm_power_supply_register(chip->dev,
++			&batt_psy_desc, &supply_config);
++	if (IS_ERR(chip->batt_psy))
++		return dev_err_probe(&pdev->dev, PTR_ERR(chip->batt_psy),
++				     "Failed to register battery\n");
++
++	platform_set_drvdata(pdev, chip);
++
++	ret = power_supply_get_battery_info(chip->batt_psy, &chip->batt_info);
++	if (ret) {
++		dev_err(&pdev->dev, "Failed to get battery info: %d\n", ret);
++		return ret;
+ 	}
+ 
+ 	/* Set default temperature thresholds */
+@@ -1241,14 +1245,6 @@ static int qcom_fg_probe(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
+-static void qcom_fg_remove(struct platform_device *pdev)
+-{
+-	struct qcom_fg_chip *chip = platform_get_drvdata(pdev);
+-
+-	if(chip->sram_wq)
+-		destroy_workqueue(chip->sram_wq);
+-}
+-
+ static const struct of_device_id fg_match_id_table[] = {
+ 	{ .compatible = "qcom,pmi8994-fg", .data = &pmi8994_data },
+ 	{ .compatible = "qcom,pmi8996-fg", .data = &pmi8996_data },
+@@ -1259,7 +1255,6 @@ MODULE_DEVICE_TABLE(of, fg_match_id_table);
+ 
+ static struct platform_driver qcom_fg_driver = {
+ 	.probe = qcom_fg_probe,
+-	.remove = qcom_fg_remove,
+ 	.driver = {
+ 		.name = "qcom-fg",
+ 		.of_match_table = fg_match_id_table,
+-- 
+2.56.0
+

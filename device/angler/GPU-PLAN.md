@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Nexus 6P (angler) GPU plan: Adreno 430 on drm/msm
 
-**Status (2026-10-18): designed and built, nothing booted yet.** Kernel branch
+**Status (2026-10-18, evening): G1 passes; G3 (the GPU SMMU) blocked in the secure world.** Kernel branch
 `omamobile-angler` in `~/android/mainline/linux-angler`, output
 `~/android/mainline/out-angler-gpu` (the RAM-root rollback stays in
 `out-angler-boot`). Goal: a render node (`/dev/dri/renderD128`) for the A430
@@ -122,3 +122,41 @@ limits; and making it the default (package version bump, the `mmcc` and
   `/etc/modprobe.d/omamobile-gpu-bringup.conf` (`blacklist msm`, `options msm
   separate_gpu_kms=1`). None of these changes the everyday boot. Then G1, G3
   and G5 with `device/angler/tools/cycle <image>` and `gpu-check` after each.
+
+### 2026-10-18 (afternoon/evening): G1 passes, G3 blocked (7.3.0-rc7-angler-gpu)
+
+- **G1 passes:** mmcc built in, simplefb holding `MDSS_GDSC` and the MDSS
+  clocks; loading `ocmem` (`8 ports, 3 regions, 32 macros, interleaved`) ran
+  mmcc's `sync_state`, and `mdss_gdsc` stayed on with the framebuffer as its
+  consumer. The console's text froze about 30 s into userspace on every boot
+  (fbcon blanked, `fb0/blank` 4, unblank refused with `EBUSY`, no DRM
+  client): not the clocks. Not yet explained.
+- **Found on the way:** `qcom_fg` registered its battery (and thermal zone)
+  before setting up SRAM access: an oops in `wait_for_common()` from the
+  thermal worker (fixed, patch 0025). `kernel-modules-hook` deleted the
+  everyday kernel's modules after a test-kernel boot (device-angler 0.1.10).
+  A reboot from a test kernel once hung after `systemd-shutdown`'s SIGTERM,
+  which also disarmed the watchdog (busybox's magic close): the init now sets
+  `nowayout` (`CONFIG_WATCHDOG_SYSFS`), and netconsole (`CONFIG_NETCONSOLE`,
+  UDP 6666 to the desktop, allowed on the USB interface in the desktop's ufw)
+  with `initcall_debug` showed a clean shutdown on the next try. `cycle`
+  now addresses only the angler's serial: another phone was in fastboot.
+- **G3, first try:** `qcom-iommu-ctx ... probe failed with error -22`:
+  `qcom_scm_restore_sec_cfg(18, 0)` refused, and each failure left the GPU
+  clocks enabled (fixed, patch 0026).
+- **The vendor kernel initializes the secure page table first**
+  (`msm_iommu_sec_ptbl_init()` at boot, unconditionally); mainline does it
+  only with a secure context bank, so the DT got `iommu-ctx@a000`
+  (`qcom,msm-iommu-v1-sec`, ASID 2, angler's `gfx3d_secure`).
+- **G3 with it resets the SoC.** Early, before USB, and ramoops kept nothing
+  (the bootloader seems to clear the splash reservation). With the BRINGUP
+  switch `qcom_iommu.late=1` (patch 0027) and netconsole:
+  `iommu sec: pgtable size: 151552`, `pgtable at 0x00000000dde00000` (CMA,
+  top of RAM), then a reset in `SECURE_PTBL_INIT`, no kernel message. Setting
+  the CP pool size first as downstream does (patch 0028; TZ accepts it)
+  changes nothing.
+- **Open:** whether the secure world wants the table elsewhere (unmapped, or
+  in the first DDR bank) or this SMMU isn't TZ-managed at all and needs the
+  host-programmed mode of the 2026 msm8974 `qcom_iommu` series
+  (non-TZ globals, BFB tables, power-collapse restore). Next: a no-map
+  reserved region for the table; failing that, the msm8974 approach.

@@ -1,0 +1,61 @@
+From 9096020962b3f48b209fa0723c0c2e714cb6e30e Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 15:26:01 -0600
+Subject: [PATCH 28/28] iommu/qcom: Size the content protection pool before the
+ secure page table
+
+The vendor kernel's msm_iommu_sec_ptbl_init() sets the content
+protection pool size (IOMMU_SET_CP_POOL_SIZE, 300 MiB) before it asks
+the secure world for the secure page table's size and hands the table
+over, on firmware whose MP service is version 1.1.1 or later. Do the
+same; older firmware refuses the call, which is harmless.
+
+MSM8994's firmware accepts the call. On its own it doesn't stop the
+SoC reset that follows the secure page table init there.
+
+Assisted-by: Claude Opus 5.5
+---
+ drivers/iommu/arm/arm-smmu/qcom_iommu.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+index 562698093..0c00c8c67 100644
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -32,6 +32,9 @@
+ 
+ #include "arm-smmu.h"
+ 
++/* MAXIMUM_VIRT_SIZE in the vendor kernel */
++#define QCOM_IOMMU_CP_POOL_SIZE	(300 * SZ_1M)
++
+ #define SMMU_INTR_SEL_NS     0x2000
+ 
+ enum qcom_iommu_clk {
+@@ -620,6 +623,15 @@ static int qcom_iommu_sec_ptbl_init(struct device *dev)
+ 	if (allocated)
+ 		return 0;
+ 
++	/*
++	 * The vendor kernel sizes the content protection pool before it asks
++	 * for the secure page table's size, on firmware that supports it
++	 * (MP version 1.1.1 or later). Older firmware refuses the call.
++	 */
++	ret = qcom_scm_iommu_set_cp_pool_size(spare, QCOM_IOMMU_CP_POOL_SIZE);
++	if (ret)
++		dev_info(dev, "iommu sec: no cp pool size (%d)\n", ret);
++
+ 	ret = qcom_scm_iommu_secure_ptbl_size(spare, &psize);
+ 	if (ret) {
+ 		dev_err(dev, "failed to get iommu secure pgtable size (%d)\n",
+@@ -638,6 +650,7 @@ static int qcom_iommu_sec_ptbl_init(struct device *dev)
+ 		return -ENOMEM;
+ 	}
+ 
++	dev_info(dev, "iommu sec: pgtable at %pad\n", &paddr);
+ 	ret = qcom_scm_iommu_secure_ptbl_init(paddr, psize, spare);
+ 	if (ret) {
+ 		dev_err(dev, "failed to init iommu pgtable (%d)\n", ret);
+-- 
+2.56.0
+

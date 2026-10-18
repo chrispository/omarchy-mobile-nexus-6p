@@ -29,6 +29,10 @@ WDT_T=5
 if [ -c /dev/watchdog ]; then
   watchdog -F -T "$WDT_T" -t 1 /dev/watchdog &
   wd_pid=$!
+  # The feeder outlives switch_root, and systemd-shutdown's final SIGTERM
+  # makes busybox disarm the watchdog on its way out: a hang after that
+  # never reset (GPU-PLAN.md). nowayout keeps it counting after the close.
+  echo 1 > /sys/class/watchdog/watchdog0/nowayout 2>/dev/null || say "watchdog: no nowayout"
   say "watchdog armed (-T $WDT_T)"
 fi
 

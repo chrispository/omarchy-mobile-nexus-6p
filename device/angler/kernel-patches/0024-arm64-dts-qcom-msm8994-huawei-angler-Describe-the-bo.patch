@@ -1,7 +1,7 @@
-From 45293925677e38656fea9df24df00278dbda2b4f Mon Sep 17 00:00:00 2001
+From e18e21efda93fb064f7aa0d98d3adae75c8d6a17 Mon Sep 17 00:00:00 2001
 From: chris <08a487@gmail.com>
 Date: Sun, 18 Oct 2026 13:44:06 -0600
-Subject: [PATCH 24/24] arm64: dts: qcom: msm8994-huawei-angler: Describe the
+Subject: [PATCH 24/28] arm64: dts: qcom: msm8994-huawei-angler: Describe the
  bootloader framebuffer
 
 The bootloader leaves the dual-DSI command-mode panel running from a

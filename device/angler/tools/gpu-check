@@ -7,7 +7,7 @@ $S '
 d=/sys/kernel/debug
 echo "== $(uname -r), up $(cut -d" " -f1 /proc/uptime)s, battery $(cat /sys/class/power_supply/qcom-battery/voltage_now 2>/dev/null) uV"
 echo "== kernel log (mmcc, gdsc, simpledrm, iommu, ocmem, msm/adreno, faults)"
-dmesg | grep -i -E "mmcc|gdsc|simple-?(drm|framebuffer)|iommu|smmu|ocmem|adreno|msm|a4xx|gpu|fault|hangcheck|firmware" | grep -v -E "usb|ttyMSM" | tail -40
+dmesg | grep -i -E "mmcc|gdsc|simple-?(drm|framebuffer)|iommu|smmu|ocmem|adreno|msm|a4xx|gpu|fault|hangcheck|firmware" | grep -v -E "usb|ttyMSM|command line|androidboot" | tail -40
 echo "== power domains (mdss, oxili)"
 grep -A3 -E "^(mdss|oxili)" $d/pm_genpd/pm_genpd_summary 2>/dev/null
 echo "== clocks (mdss, oxili, gfx3d, ocmem)"

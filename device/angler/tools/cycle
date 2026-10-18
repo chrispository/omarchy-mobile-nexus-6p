@@ -1,14 +1,21 @@
 #!/bin/bash
 # Reboot the phone into fastboot from Linux, fastboot-boot an image, wait for SSH
 # Desktop side (nexus_linux_plan.md): run from the repository.
+# Only the angler is ever addressed: its serial comes from ANGLER_SERIAL or
+# from ~/android/reference/angler/serial (private, never in the repository),
+# and fastboot is always run with -s. Other phones in fastboot on this
+# desktop (a Pixel, say) are left alone.
 img=$1
+serial=${ANGLER_SERIAL:-$(cat ~/android/reference/angler/serial 2>/dev/null)}
+[[ -n $serial ]] || { echo "no angler serial: set ANGLER_SERIAL or ~/android/reference/angler/serial"; exit 1; }
 S="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=2 root@172.16.42.1"
-if ! fastboot devices | grep -q fastboot; then
+in_fastboot() { fastboot devices | awk '{print $1}' | grep -qxF "$serial"; }
+if ! in_fastboot; then
   $S 'nohup sh -c "sleep 1; reboot-to bootloader" >/dev/null 2>&1 </dev/null &' || { echo "no ssh"; exit 1; }
-  for i in $(seq 1 60); do sleep 2; fastboot devices | grep -q fastboot && break; done
+  for i in $(seq 1 60); do sleep 2; in_fastboot && break; done
 fi
-fastboot devices | grep -q fastboot || { echo "no fastboot"; exit 1; }
-fastboot boot "$img" 2>&1 | tail -1
+in_fastboot || { echo "angler not in fastboot"; exit 1; }
+fastboot -s "$serial" boot "$img" 2>&1 | tail -1
 t0=$(date +%s)
 for i in $(seq 1 90); do $S true 2>/dev/null && { echo "ssh after $(( $(date +%s)-t0 ))s"; exit 0; }; sleep 2; done
 echo "no ssh after $(( $(date +%s)-t0 ))s"; exit 1

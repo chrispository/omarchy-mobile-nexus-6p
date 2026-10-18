@@ -1,0 +1,40 @@
+From 3b98c14e29bdbfa86ad36a7a43cda6494f9172ec Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 14:44:43 -0600
+Subject: [PATCH 26/28] iommu/qcom: Disable the clocks again when resume fails
+
+qcom_iommu_resume() enables the clocks and then, for an IOMMU in a
+power domain, asks the secure world to restore its configuration. When
+that call failed, the error went back to runtime PM with the clocks
+still enabled, and every later attempt took another reference: on
+MSM8994, where the call failed at first, each probe of the GPU SMMU's
+context bank left the GPU core and AHB clocks enabled once more.
+
+Undo the clock enable when the secure configuration fails.
+
+Assisted-by: Claude Opus 5.5
+---
+ drivers/iommu/arm/arm-smmu/qcom_iommu.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+index 21d18ce67..ef2cf87ba 100644
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -899,8 +899,11 @@ static int __maybe_unused qcom_iommu_resume(struct device *dev)
+ 	if (ret < 0)
+ 		return ret;
+ 
+-	if (dev->pm_domain)
+-		return qcom_scm_restore_sec_cfg(qcom_iommu->sec_id, 0);
++	if (dev->pm_domain) {
++		ret = qcom_scm_restore_sec_cfg(qcom_iommu->sec_id, 0);
++		if (ret)
++			clk_bulk_disable_unprepare(CLK_NUM, qcom_iommu->clks);
++	}
+ 
+ 	return ret;
+ }
+-- 
+2.56.0
+
