@@ -1,0 +1,87 @@
+Subject: [PATCH] BRINGUP: iommu/qcom: Leave secured banks' IRQ alone, trace faults
+
+angler's GPU SMMU signals faults from both of its context banks on one
+interrupt (SPI 241), and the driver requested it for the secured bank
+too. With 0039 the first GPU use reached a4xx_hw_init and the user bank
+reported a translation fault at IOVA 0x1001000 (the ringbuffer); the
+SoC reset right after. On a shared interrupt every handler runs, so
+the secured bank's handler read that bank's ARM_SMMU_CB_FSR, the same
+access that 0036 found resets the SoC.
+
+Request the fault interrupt only for banks the non-secure side owns.
+
+Diagnostic part, not for upstream: for the first four faults, log FSR,
+FSYNR0, FAR, the bank's TTBR0/TCR/SCTLR as read back and the CPU's own
+walk of the faulting IOVA, so the next test can tell an unmapped IOVA
+from tables the SMMU can't walk. msm's fault handler claims the fault,
+so the driver's own message never printed these.
+
+Apply with git apply after 0039.
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -219,6 +219,11 @@
+ 	.tlb_add_page	= qcom_iommu_tlb_add_page,
+ };
+ 
++static atomic_t fault_reports = ATOMIC_INIT(0);
++
++static phys_addr_t qcom_iommu_iova_to_phys(struct iommu_domain *domain,
++					   dma_addr_t iova);
++
+ static irqreturn_t qcom_iommu_fault(int irq, void *dev)
+ {
+ 	struct qcom_iommu_ctx *ctx = dev;
+@@ -233,6 +238,21 @@
+ 	fsynr = iommu_readl(ctx, ARM_SMMU_CB_FSYNR0);
+ 	iova = iommu_readq(ctx, ARM_SMMU_CB_FAR);
+ 
++	/* BRINGUP: the first faults' registers and the CPU's view of the iova */
++	if (atomic_inc_return(&fault_reports) <= 4) {
++		phys_addr_t phys = 0;
++
++		if (ctx->domain && ctx->domain->type & __IOMMU_DOMAIN_PAGING)
++			phys = qcom_iommu_iova_to_phys(ctx->domain, iova);
++		dev_err(ctx->dev,
++			"fault: fsr 0x%x fsynr0 0x%x far 0x%llx cb %u: ttbr0 0x%llx tcr 0x%x sctlr 0x%x, cpu walk 0x%llx (saved ttbr0 0x%llx)\n",
++			fsr, fsynr, iova, ctx->asid,
++			iommu_readq(ctx, ARM_SMMU_CB_TTBR0),
++			iommu_readl(ctx, ARM_SMMU_CB_TCR),
++			iommu_readl(ctx, ARM_SMMU_CB_SCTLR),
++			(u64)phys, ctx->ttbr0);
++	}
++
+ 	if (report_iommu_fault(ctx->domain, ctx->dev, iova, 0)) {
+ 		dev_err_ratelimited(ctx->dev,
+ 				    "Unhandled context fault: fsr=0x%x, "
+@@ -960,14 +980,21 @@
+ 		pm_runtime_put_sync(dev->parent);
+ 	}
+ 
+-	ret = devm_request_irq(dev, irq,
+-			       qcom_iommu_fault,
+-			       IRQF_SHARED,
+-			       "qcom-iommu-fault",
+-			       ctx);
+-	dev_info(dev, "iommu ctx: irq request returned %d\n", ret);
+-	if (ret)
+-		return ret;
++	/*
++	 * A secured bank's registers belong to the secure world, and it may
++	 * share its fault interrupt with a non-secure bank: a handler here
++	 * would read the secured bank's FSR on every non-secure fault.
++	 */
++	if (!ctx->secured_ctx) {
++		ret = devm_request_irq(dev, irq,
++				       qcom_iommu_fault,
++				       IRQF_SHARED,
++				       "qcom-iommu-fault",
++				       ctx);
++		dev_info(dev, "iommu ctx: irq request returned %d\n", ret);
++		if (ret)
++			return ret;
++	}
+ 
+ 	ret = get_asid(dev->of_node);
+ 	if (ret < 0) {

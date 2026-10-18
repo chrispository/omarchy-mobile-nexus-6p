@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Nexus 6P GPU handoff: start here
 
-Updated 2026-10-18 after the SMMU and render-node tests. Read
+Updated 2026-10-18 (night): 0039 confirmed on the phone; G6 now faults at the ringbuffer; 0040 built, not yet booted. Latest results: [GPU-PLAN.md](GPU-PLAN.md#results). Read
 [AGENTS.md](../../AGENTS.md), [NOTES.md](NOTES.md) and
 [GPU-PLAN.md](GPU-PLAN.md) before hardware work.
 
@@ -25,12 +25,29 @@ kernel's module directory `/usr/lib/modules/7.3.0-rc7-angler-gpu`; the old
 file is backed up on the phone at `/tmp/ocmem.ko.before-0037`. The installed
 kernel and its modules are untouched.
 
-**Next action:** do **not** repeat the G5 render test unchanged. Instrument the
-G6 path after `iommu pm: restore returned 0`: the IOMMU context programming
-(`qcom_iommu_init_domain`/`qcom_iommu_attach_dev`) and the GPU boot sequence
-(`msm_iommu_attach`, `a4xx_gpu_init`, `msm_gpu_init`), or enable dynamic debug
-for `msm` and `qcom_iommu`, then run the same EGL/GBM test under logs and the
-watchdog. One new image, one boot. Exact gate below.
+**Likely G6 cause (from the logs and source, not yet proven on the phone):
+the GPU SMMU's context bank is never reprogrammed after a power collapse.**
+`qcom_iommu` programs TTBR0/TCR/MAIR/SCTLR once, when `msm` attaches at bind
+(`angler-g5c-kmsg.log`: resume, `Initialized msm`, then `iommu pm: suspend`).
+The SMMU's only power domain is `OXILI_GX_GDSC`, which can collapse with the
+idle GPU. On first use the resume calls only `restore_sec_cfg`, which restores
+TZ's global space, not the context bank. A bank that comes back with SCTLR.M
+clear passes the GPU's IOVAs (from 16 MiB up) through as physical addresses,
+into the kernel image at 0x80000-0x1ae8000. That matches a silent reset with no
+context fault. The vendor driver never meets this: `msm_iommu-v1.c` enables
+the SMMU's GDSCs (`vdd-supply` CX, `qcom,alt-vdd-supply` GX) at attach and
+holds them until detach, reprogramming the bank on every attach.
+
+**0039 confirmed:** the bank read `SCTLR 0x00000000` before the restore.
+With it the GPU reached `a4xx_hw_init`, loaded PM4/PFP, and the user bank
+faulted at IOVA `0x1001000` (the ringbuffer); the SoC then reset, most likely
+because the secured bank's handler on the shared SPI 241 read its `CB_FSR`.
+
+**Next action:** boot `angler-gpu-g6-irqfix.img` (0040: no IRQ handler on
+secured banks; the first faults' registers and the CPU's walk of the IOVA
+logged), read `/sys/kernel/debug/dri/1/gem` after `modprobe msm`, then run
+the same EGL/GBM test with `drm.debug=0x2`. The test binary is
+`/root/egl-gpu-test` on the phone. Same gate below.
 
 The owner authorized the one-shot diagnostic boots that produced these
 results. Ask before any further boot, module push or persistent change.
@@ -60,6 +77,12 @@ results. Ask before any further boot, module push or persistent change.
   - 0038 sets `ARM_SMCCC_OWNER_SIP` on the OCMEM lock/unlock SCM calls. The
     availability check used SIP, but the call itself used owner 0 and
     returned `-EIO`.
+- 0039 restores the context banks on runtime resume (confirmed needed on
+  the phone) and logs SCTLR before/after. 0040 stops requesting the fault
+  IRQ for secured banks (functional) and traces the first faults
+  (diagnostic). Both applied in the worktree. Build with `W=1` throughout:
+  the earlier objects were built that way, and a build without it
+  recompiles half the tree.
 - Repository edits include this handoff, GPU plan, notes, patches 0031-0038,
   and the earlier `device/angler/tools/cycle` RAM-root fix. Nothing from this
   work has been committed or pushed.
@@ -73,6 +96,8 @@ All images live in `~/android/mainline/out-angler-gpu/`:
 | `angler-gpu-mm-power-secure3.img` | `ef34fc5e815ad4580687d9248f7962c93e7cd0fac0067ceceaec5de2967ea5d0` | Tested; pinpointed the v1-sec FSR reset |
 | `angler-gpu-mm-power-secure4.img` | `128c87f004f51f986bba5bbe451aa3c641a638a240fc484410841877fd921f72` | Tested; IOMMU registered, contexts up |
 | `angler-gpu-g5-0036.img` | `ffe59c03230cfcdd5185e8b7ca1a9a599ea1fc3c4cbaa436598b25ba27d95e57` | Tested; OCMEM stride oops |
+| `angler-gpu-g6-irqfix.img` | `724b83f2dafbb644e54c67c404d99103a55c2a9b9cda51754d6be1a765bc4861` | Built (0039+0040, full `W=1`); same DTB and cmdline; not booted |
+| `angler-gpu-g6-ctxrestore.img` | `104a304556cd6a07b33ad39cc3eeb2da5cbc5c526daa3ca186bad723144777a0` | Tested (0039): bank restored, then ringbuffer fault and reset |
 | `angler-gpu-g5-0038.img` | `fb06ca3ed0d50a8663eb8b2e622266e74a610627eac70f3c3682200ba1e47966` | Tested; `renderD128`, then G6 reset |
 | `angler-gpu-zero.img` | `9ccd3d2602f889d039a1b5927e015779a7a88fc602f43e3c55392f0fc2518450` | Superseded; reset in secure init |
 | `angler-gpu-clock27-enabled.img` | `bb236b17508aad6126fa041b12d734879c58b527385b5579b60452eefca569cc` | Superseded; 27 MHz confirmed, reset |
@@ -86,7 +111,8 @@ The G5 images use `angler-gpu-g5.dtb`, a copy of `angler.dtb` with
 also uses `ptbl_probe_only=1`. The secure-table reservation is
 `0x0e900000` / `0x40000`.
 
-Validation: checkpatch `--strict --no-signoff` clean for 0031-0038. The
+Validation: checkpatch `--strict --no-signoff` clean for 0031-0038; 0039
+has only a CamelCase check on the existing `ARM_SMMU_TTBRn_ASID` macro. The
 latest `W=1` Image/DTB builds completed without warnings in the changed
 drivers. `dt-validate` on the assigned-rate image was identical to the base
 DTB except the existing `memory-region` schema issue from 0029; the latest
@@ -181,12 +207,10 @@ render test unchanged.
    `/sys/bus/iio/devices/iio:device0/in_voltage7_input`; the fuel gauge and
    ADC have differed (3.8x V vs about 3.70 V). Respect the conservative
    threshold; charge if needed. Do not reboot below about 3.5 V.
-2. Build **one** new G5/G6 trace image from the current worktree, with the
-   GPU and IOMMU nodes enabled and the same cmdline as
-   `angler-gpu-g5-0038.img`. Add markers to the attach/init path (or use
-   dynamic debug for `msm` and `qcom_iommu`) before the boot; do not reuse
-   `angler-gpu-g5-0038.img` unchanged. Announce the screen interruption.
-3. Boot it with `device/angler/tools/cycle <image>`. Require test kernel,
+2. Done offline: `angler-gpu-g6-ctxrestore.img` (sha256 above). Announce
+   the screen interruption before booting it.
+3. Boot it with `device/angler/tools/cycle
+   ~/android/mainline/out-angler-gpu/angler-gpu-g6-ctxrestore.img`. Require test kernel,
    `late=Y`, `ptbl_mm_power=Y`, `ptbl_bus_rate=27000000`, `ptbl_zero=Y`, and
    `ptbl_probe_only=N` under `/sys/module/qcom_iommu/parameters/`. Stop if
    different. Wait for Arch `running` and no pending marker.
@@ -197,7 +221,14 @@ render test unchanged.
    `echo 1 > /sys/module/qcom_iommu/parameters/register`. Require the driver
    bound and no reset. Then `modprobe ocmem; modprobe msm` (msm is
    blacklisted). Require `renderD128` and `card1` bound to `adreno`.
-6. Run the offscreen EGL/GBM test under the log streams. Stop at the first
+6. `echo 0x2 > /sys/module/drm/parameters/debug` (msm's `DBG()` then marks
+   each hw_init stage, e.g. `loading PM4 ucode version`). Run the offscreen
+   EGL/GBM test under the log streams. On the first-use resume, expect
+   `iommu pm: ctx 0 SCTLR 0x... before restore` then `... restored` with the
+   M bit (bit 0) set. A `before` value with M clear confirms the cause; M
+   still set means the bank kept its state and the cause lies elsewhere
+   (follow the drm debug markers). A context fault after the restore is
+   progress, not a reason to retry: record FAR/FSYNR and stop. Stop at the first
    reset or fault. The expected pass is `GL_RENDERER` containing `FD430` and a
    correct pixel readback, with no fault, hangcheck or reset. A reset after
    the last trace marker is the finding; wait at least two minutes for

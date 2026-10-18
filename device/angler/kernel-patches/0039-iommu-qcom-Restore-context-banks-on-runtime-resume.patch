@@ -1,0 +1,152 @@
+Subject: [PATCH] iommu/qcom: Restore context banks on runtime resume
+
+The context banks are programmed once, when a domain is first attached,
+and runtime resume only asks the secure world to restore its global
+configuration (qcom_scm_restore_sec_cfg). When the SMMU sits in a power
+domain that collapses while its master is idle, the bank loses TTBR0,
+TCR, MAIR and SCTLR, and the master's next transaction meets a disabled
+bank: its I/O virtual addresses pass through untranslated.
+
+On angler (MSM8994) the GPU SMMU is in OXILI_GX_GDSC. drm/msm attached
+the domain at bind, the SMMU then suspended, and the first GPU use
+resumed it (restore_sec_cfg returned 0) and reset the SoC with no fault
+reported. The vendor driver (msm_iommu-v1.c) holds the SMMU's GDSCs
+from attach to detach and reprograms the bank on each attach, so its
+state never has to survive a collapse.
+
+Keep the programmed values in the context and write them back after
+every runtime resume. The resume logs SCTLR before and after the
+restore so the bring-up test shows whether the bank had lost its state.
+
+Apply with git apply after 0038.
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -87,6 +87,13 @@
+ 	bool			 secured_ctx;
+ 	u8			 asid;      /* asid and ctx bank # are 1:1 */
+ 	struct iommu_domain	*domain;
++	/* Context bank state, restored when the SMMU's power domain returns */
++	u64			 ttbr0;
++	u32			 tcr;
++	u32			 tcr2;
++	u32			 mair0;
++	u32			 mair1;
++	u32			 sctlr;
+ };
+ 
+ struct qcom_iommu_domain {
+@@ -239,6 +246,25 @@
+ 	return IRQ_HANDLED;
+ }
+ 
++static void qcom_iommu_program_ctx(struct qcom_iommu_ctx *ctx)
++{
++	/* Disable context bank before programming */
++	iommu_writel(ctx, ARM_SMMU_CB_SCTLR, 0);
++
++	/* Clear context bank fault address fault status registers */
++	iommu_writel(ctx, ARM_SMMU_CB_FAR, 0);
++	iommu_writel(ctx, ARM_SMMU_CB_FSR, ARM_SMMU_CB_FSR_FAULT);
++
++	iommu_writeq(ctx, ARM_SMMU_CB_TTBR0, ctx->ttbr0);
++	iommu_writeq(ctx, ARM_SMMU_CB_TTBR1, 0);
++	iommu_writel(ctx, ARM_SMMU_CB_TCR2, ctx->tcr2);
++	iommu_writel(ctx, ARM_SMMU_CB_TCR, ctx->tcr);
++	iommu_writel(ctx, ARM_SMMU_CB_S1_MAIR0, ctx->mair0);
++	iommu_writel(ctx, ARM_SMMU_CB_S1_MAIR1, ctx->mair1);
++
++	iommu_writel(ctx, ARM_SMMU_CB_SCTLR, ctx->sctlr);
++}
++
+ static int qcom_iommu_init_domain(struct iommu_domain *domain,
+ 				  struct qcom_iommu_dev *qcom_iommu,
+ 				  struct device *dev)
+@@ -293,30 +319,17 @@
+ 			continue;
+ 		}
+ 
+-		/* Disable context bank before programming */
+-		iommu_writel(ctx, ARM_SMMU_CB_SCTLR, 0);
+-
+-		/* Clear context bank fault address fault status registers */
+-		iommu_writel(ctx, ARM_SMMU_CB_FAR, 0);
+-		iommu_writel(ctx, ARM_SMMU_CB_FSR, ARM_SMMU_CB_FSR_FAULT);
+-
+ 		/* TTBRs */
+-		iommu_writeq(ctx, ARM_SMMU_CB_TTBR0,
+-				pgtbl_cfg.arm_lpae_s1_cfg.ttbr |
+-				FIELD_PREP(ARM_SMMU_TTBRn_ASID, ctx->asid));
+-		iommu_writeq(ctx, ARM_SMMU_CB_TTBR1, 0);
++		ctx->ttbr0 = pgtbl_cfg.arm_lpae_s1_cfg.ttbr |
++			     FIELD_PREP(ARM_SMMU_TTBRn_ASID, ctx->asid);
+ 
+ 		/* TCR */
+-		iommu_writel(ctx, ARM_SMMU_CB_TCR2,
+-				arm_smmu_lpae_tcr2(&pgtbl_cfg));
+-		iommu_writel(ctx, ARM_SMMU_CB_TCR,
+-			     arm_smmu_lpae_tcr(&pgtbl_cfg) | ARM_SMMU_TCR_EAE);
++		ctx->tcr2 = arm_smmu_lpae_tcr2(&pgtbl_cfg);
++		ctx->tcr = arm_smmu_lpae_tcr(&pgtbl_cfg) | ARM_SMMU_TCR_EAE;
+ 
+ 		/* MAIRs (stage-1 only) */
+-		iommu_writel(ctx, ARM_SMMU_CB_S1_MAIR0,
+-				pgtbl_cfg.arm_lpae_s1_cfg.mair);
+-		iommu_writel(ctx, ARM_SMMU_CB_S1_MAIR1,
+-				pgtbl_cfg.arm_lpae_s1_cfg.mair >> 32);
++		ctx->mair0 = pgtbl_cfg.arm_lpae_s1_cfg.mair;
++		ctx->mair1 = pgtbl_cfg.arm_lpae_s1_cfg.mair >> 32;
+ 
+ 		/* SCTLR */
+ 		reg = ARM_SMMU_SCTLR_CFIE | ARM_SMMU_SCTLR_CFRE |
+@@ -327,7 +340,9 @@
+ 		if (IS_ENABLED(CONFIG_CPU_BIG_ENDIAN))
+ 			reg |= ARM_SMMU_SCTLR_E;
+ 
+-		iommu_writel(ctx, ARM_SMMU_CB_SCTLR, reg);
++		ctx->sctlr = reg;
++
++		qcom_iommu_program_ctx(ctx);
+ 
+ 		ctx->domain = domain;
+ 	}
+@@ -1142,6 +1157,7 @@
+ static int __maybe_unused qcom_iommu_resume(struct device *dev)
+ {
+ 	struct qcom_iommu_dev *qcom_iommu = dev_get_drvdata(dev);
++	unsigned int i;
+ 	int ret;
+ 
+ 	dev_info(dev, "iommu pm: resume\n");
+@@ -1154,8 +1170,29 @@
+ 		dev_info(dev, "iommu pm: restoring secure config\n");
+ 		ret = qcom_scm_restore_sec_cfg(qcom_iommu->sec_id, 0);
+ 		dev_info(dev, "iommu pm: restore returned %d\n", ret);
+-		if (ret)
++		if (ret) {
+ 			clk_bulk_disable_unprepare(CLK_NUM, qcom_iommu->clks);
++			return ret;
++		}
++	}
++
++	/*
++	 * A context bank loses its programming when the SMMU's power domain
++	 * collapses, and the secure world restores only the global space.
++	 * Without this the bank comes back disabled and its master's
++	 * addresses pass through untranslated.
++	 */
++	for (i = 0; i <= qcom_iommu->max_asid; i++) {
++		struct qcom_iommu_ctx *ctx = qcom_iommu->ctxs[i];
++
++		if (!ctx || !ctx->domain || ctx->secured_ctx)
++			continue;
++
++		dev_info(dev, "iommu pm: ctx %u SCTLR 0x%08x before restore\n",
++			 ctx->asid, iommu_readl(ctx, ARM_SMMU_CB_SCTLR));
++		qcom_iommu_program_ctx(ctx);
++		dev_info(dev, "iommu pm: ctx %u SCTLR 0x%08x restored\n",
++			 ctx->asid, iommu_readl(ctx, ARM_SMMU_CB_SCTLR));
+ 	}
+ 
+ 	return ret;

@@ -1,7 +1,9 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Nexus 6P (angler) GPU plan: Adreno 430 on drm/msm
 
-**Status (2026-10-18, late evening): G1-G5 pass; G6 resets on first GPU use.** Kernel branch
+**Status (2026-10-18, night): G1-G5 pass. G6: 0039 confirmed; the GPU now
+starts its CP and takes a context fault at the ringbuffer, then resets
+(likely the shared fault IRQ, fix 0040 built, not booted).** Kernel branch
 `omamobile-angler` in `~/android/mainline/linux-angler`, output
 `~/android/mainline/out-angler-gpu` (the RAM-root rollback stays in
 `out-angler-boot`). Goal: a render node (`/dev/dri/renderD128`) for the A430
@@ -111,6 +113,49 @@ limits; and making it the default (package version bump, the `mmcc` and
 `ocmem` blacklist lines go, `boot` flash with the owner's go).
 
 ## Results
+
+### 2026-10-18 night: 0039 confirmed; the GPU runs into a fault, then the shared IRQ
+
+Owner-approved boots of `angler-gpu-g6-ctxrestore.img` (0039) on
+`7.3.0-rc7-angler-gpu`. The first boot reset on its own about 50 s in,
+during Arch's udev coldplug, before the IOMMU was registered (0039's code
+can't run then); the journal stops at 23 s and there was no other log.
+Not explained; the second boot was clean. Battery 3.92 V, watchdog active
+with `nowayout`, SSH kmsg (`angler-g6b-kmsg.log`) and netconsole live.
+
+- **The context bank did lose its state.** At the resume during `msm`'s
+  probe: `ctx 0 SCTLR 0x00000000 before restore`, `0x000010e7 restored`.
+  0039 is a real fix.
+- **The GPU now gets further:** `msm_gpu_pm_resume` (chip 04030002),
+  `a4xx_hw_init` loaded PM4 and PFP, and then the user bank faulted at
+  IOVA `0x1001000` (memptrs sits at 0x1000000, the ringbuffer at
+  0x1001000: the CP's first ringbuffer fetch). The SoC reset right after.
+  msm's handler claims the fault, so FSR/FSYNR were not printed.
+- **Likely reset cause:** both banks share SPI 241, and the secured bank
+  had a handler on it, so a user-bank fault made the kernel read the
+  secured bank's `CB_FSR`, the access 0036 already found resets the SoC.
+  0040 requests the IRQ only for non-secured banks and logs the first
+  faults' FSR/FSYNR0/FAR, TTBR0/TCR/SCTLR and the CPU's walk of the IOVA.
+  Image `angler-gpu-g6-irqfix.img`. Not yet booted.
+- **Open:** why the ringbuffer's IOVA faults. 0040's log separates an
+  unmapped IOVA (CPU walk 0) from tables the SMMU can't walk (CPU walk
+  finds a page). Also read `/sys/kernel/debug/dri/1/gem` after `modprobe
+  msm` for the kernel BOs' IOVAs.
+
+### 2026-10-18 night: the G6 reset explained (offline), fix 0039
+
+From the G5c log and the source, no phone work. `qcom_iommu` programs the
+GPU context bank once, when drm/msm attaches at bind; the SMMU then
+runtime-suspends with the idle GPU, and its power domain is `OXILI_GX_GDSC`.
+On first use the resume calls only `qcom_scm_restore_sec_cfg()`, which
+restores TZ's global registers but not the context bank. If GX collapsed,
+SCTLR.M is clear and the GPU's IOVAs pass through untranslated, into the
+kernel image's physical range. That fits a reset with no fault, oops or
+pstore. The vendor driver holds the SMMU's CX and GX GDSCs from attach to
+detach and reprograms the bank on each attach. Patch 0039 stores the bank's
+values and writes them back on every runtime resume, logging SCTLR before
+and after. The image is `angler-gpu-g6-ctxrestore.img`; the runbook is in
+[GPU-HANDOFF.md](GPU-HANDOFF.md#next-gated-runbook). Not yet tested.
 
 ### 2026-10-18 late evening: secure SMMU, render node, and the G6 reset
 
