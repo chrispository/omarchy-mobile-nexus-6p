@@ -1,0 +1,65 @@
+From 45293925677e38656fea9df24df00278dbda2b4f Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 13:44:06 -0600
+Subject: [PATCH 24/24] arm64: dts: qcom: msm8994-huawei-angler: Describe the
+ bootloader framebuffer
+
+The bootloader leaves the dual-DSI command-mode panel running from a
+1440x2560 RGB888 splash buffer at 0x03400000. Describe it as a
+simple-framebuffer with the MDSS clocks and power domain it depends
+on, as msm8992-xiaomi-libra does.
+
+Without a consumer, genpd powers MDSS_GDSC off at the multimedia clock
+controller's sync_state, which takes the display down as soon as mmcc
+probes.
+
+Assisted-by: Claude Opus 5.5
+---
+ .../qcom/msm8994-huawei-angler-rev-101.dts    | 30 +++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts b/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts
+index b870e5c11..f1c3f14bf 100644
+--- a/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts
++++ b/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts
+@@ -43,7 +43,37 @@ aliases {
+ 	};
+ 
+ 	chosen {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
+ 		stdout-path = "serial0:115200n8";
++
++		/*
++		 * The bootloader's splash buffer, scanned out by the MDSS it
++		 * set up for the dual-DSI command-mode panel. The clocks and
++		 * the power domain keep that setup alive once mmcc probes.
++		 */
++		framebuffer0: framebuffer@3400000 {
++			compatible = "simple-framebuffer";
++			reg = <0 0x03400000 0 (1440 * 2560 * 3)>;
++			width = <1440>;
++			height = <2560>;
++			stride = <(1440 * 3)>;
++			format = "r8g8b8";
++
++			clocks = <&mmcc MDSS_AHB_CLK>,
++				 <&mmcc MDSS_AXI_CLK>,
++				 <&mmcc MDSS_VSYNC_CLK>,
++				 <&mmcc MDSS_MDP_CLK>,
++				 <&mmcc MDSS_BYTE0_CLK>,
++				 <&mmcc MDSS_PCLK0_CLK>,
++				 <&mmcc MDSS_ESC0_CLK>,
++				 <&mmcc MDSS_BYTE1_CLK>,
++				 <&mmcc MDSS_PCLK1_CLK>,
++				 <&mmcc MDSS_ESC1_CLK>;
++			power-domains = <&mmcc MDSS_GDSC>;
++		};
+ 	};
+ 
+ 	reserved-memory {
+-- 
+2.56.0
+

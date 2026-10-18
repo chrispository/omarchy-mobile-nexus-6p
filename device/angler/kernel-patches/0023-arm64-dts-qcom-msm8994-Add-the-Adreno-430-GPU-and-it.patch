@@ -1,0 +1,113 @@
+From bf0cec32b62375abf171ad4bf3db451a320ef7f0 Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 13:44:06 -0600
+Subject: [PATCH 23/24] arm64: dts: qcom: msm8994: Add the Adreno 430 GPU and
+ its IOMMU
+
+Describe the Adreno 430 and the SMMU in front of it, both disabled
+until a board enables them.
+
+The values follow the vendor kernel's msm8994-gpu.dtsi and
+msm-iommu-v1.dtsi: the GPU at 0xfdb00000 on SPI 33 with the gfx3d,
+AHB and RBBM timer clocks, powered by the OXILI GX GDSC, its GMEM in
+OCMEM, and the frequencies 27 to 600 MHz. The register range stops at
+0x10000, as on MSM8974, so it doesn't overlap the SMMU at 0xfdb10000.
+
+The SMMU's global space is owned by the secure world (secure ID 18).
+The secure world numbers context banks from the first one, 0x8000
+into the SMMU, so the user context bank there gets ASID 0.
+
+Assisted-by: Claude Opus 5.5
+---
+ arch/arm64/boot/dts/qcom/msm8994.dtsi | 75 +++++++++++++++++++++++++++
+ 1 file changed, 75 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/msm8994.dtsi b/arch/arm64/boot/dts/qcom/msm8994.dtsi
+index b5cbdd620..e32bf9100 100644
+--- a/arch/arm64/boot/dts/qcom/msm8994.dtsi
++++ b/arch/arm64/boot/dts/qcom/msm8994.dtsi
+@@ -1081,6 +1081,81 @@ mmcc: clock-controller@fd8c0000 {
+ 					       <600000000>;
+ 		};
+ 
++		gpu: gpu@fdb00000 {
++			compatible = "qcom,adreno-430.2", "qcom,adreno";
++			reg = <0xfdb00000 0x10000>;
++			reg-names = "kgsl_3d0_reg_memory";
++
++			interrupts = <GIC_SPI 33 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "kgsl_3d0_irq";
++
++			clocks = <&mmcc OXILI_GFX3D_CLK>,
++				 <&mmcc OXILICX_AHB_CLK>,
++				 <&mmcc OXILI_RBBMTIMER_CLK>;
++			clock-names = "core", "iface", "rbbmtimer";
++
++			power-domains = <&mmcc OXILI_GX_GDSC>;
++			iommus = <&gpu_iommu 0>;
++			sram = <&gmu_sram>;
++			operating-points-v2 = <&gpu_opp_table>;
++
++			status = "disabled";
++
++			gpu_opp_table: opp-table {
++				compatible = "operating-points-v2";
++
++				opp-600000000 {
++					opp-hz = /bits/ 64 <600000000>;
++				};
++
++				opp-400000000 {
++					opp-hz = /bits/ 64 <400000000>;
++				};
++
++				opp-300000000 {
++					opp-hz = /bits/ 64 <300000000>;
++				};
++
++				opp-150000000 {
++					opp-hz = /bits/ 64 <150000000>;
++				};
++
++				opp-27000000 {
++					opp-hz = /bits/ 64 <27000000>;
++				};
++			};
++		};
++
++		gpu_iommu: iommu@fdb10000 {
++			compatible = "qcom,msm8994-iommu", "qcom,msm-iommu-v1";
++			ranges = <0 0xfdb10000 0x10000>;
++
++			clocks = <&mmcc OXILICX_AHB_CLK>,
++				 <&mmcc OXILI_GFX3D_CLK>;
++			clock-names = "iface", "bus";
++			power-domains = <&mmcc OXILI_GX_GDSC>;
++
++			#address-cells = <1>;
++			#size-cells = <1>;
++			#iommu-cells = <1>;
++			qcom,iommu-secure-id = <18>;
++
++			status = "disabled";
++
++			/*
++			 * The context banks start 0x8000 into the SMMU, and the
++			 * secure world numbers them from there.
++			 */
++
++			/* gfx3d_user */
++			iommu-ctx@8000 {
++				compatible = "qcom,msm-iommu-v1-ns";
++				reg = <0x8000 0x1000>;
++				interrupts = <GIC_SPI 241 IRQ_TYPE_LEVEL_HIGH>;
++				qcom,ctx-asid = <0>;
++			};
++		};
++
+ 		ocmem: sram@fdd00000 {
+ 			compatible = "qcom,msm8974-ocmem";
+ 			reg = <0xfdd00000 0x2000>,
+-- 
+2.56.0
+

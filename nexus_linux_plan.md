@@ -558,7 +558,10 @@ software rendering at this resolution stays at a few fps with both.
 - device-angler **0.1.8** (watchdog steps aside when the initramfs's busybox
   feeder holds the device) is committed.
 
-**GPU plan (next big step), from the kernel tree (`linux-angler`, 7.3-rc7):**
+**GPU plan:** superseded by [device/angler/GPU-PLAN.md](device/angler/GPU-PLAN.md)
+(drm/msm now needs the GPU IOMMU, and mmcc can't load until simpledrm holds
+the MDSS GDSC). The first notes, kept for the record,
+**from the kernel tree (`linux-angler`, 7.3-rc7):**
 drm/msm already knows the Adreno 430 (`a4xx_catalog.c`, chip id
 `0x04030002`, firmware `a420_pm4.fw`/`a420_pfp.fw` from linux-firmware), and
 `msm.separate_gpu_kms=1` gives a GPU-only render node next to simpledrm

@@ -1,0 +1,30 @@
+From 8f3a2064d7040a935cf9132843364feb96bcc143 Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 13:44:06 -0600
+Subject: [PATCH 22/24] dt-bindings: iommu: qcom,iommu: Add MSM8994
+
+The MSM8994 GPU sits behind an SMMU v1 whose global registers belong
+to the secure world, like the MSM8916 one: Linux programs only the
+context banks, after the secure configuration call. Add a compatible
+for it.
+
+Assisted-by: Claude Opus 5.5
+---
+ Documentation/devicetree/bindings/iommu/qcom,iommu.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/iommu/qcom,iommu.yaml b/Documentation/devicetree/bindings/iommu/qcom,iommu.yaml
+index 93a489025..e2e3b082a 100644
+--- a/Documentation/devicetree/bindings/iommu/qcom,iommu.yaml
++++ b/Documentation/devicetree/bindings/iommu/qcom,iommu.yaml
+@@ -24,6 +24,7 @@ properties:
+               - qcom,msm8917-iommu
+               - qcom,msm8937-iommu
+               - qcom,msm8953-iommu
++              - qcom,msm8994-iommu
+           - const: qcom,msm-iommu-v1
+       - items:
+           - enum:
+-- 
+2.56.0
+

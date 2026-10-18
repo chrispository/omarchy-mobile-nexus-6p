@@ -12,6 +12,8 @@
 #   CMDLINE     kernel command line (reboot=warm: the PMIC power-key driver
 #               otherwise makes every restart a hard reset, which loses the
 #               IMEM restart reason reboot-to writes)
+#   ENABLE      DT node paths to set okay, for a bring-up image
+#               (device/angler/GPU-PLAN.md: /soc@0/iommu@fdb10000 ...)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
@@ -21,6 +23,7 @@ WORK="${WORK:-$HOME/android}"
 KERNEL_DIR="${KERNEL_DIR:-$WORK/mainline/linux-angler}"
 KERNEL_OUT="${KERNEL_OUT:-$WORK/mainline/out-angler-boot}"
 BOARD_ID="${BOARD_ID:-0x1f57}"
+ENABLE="${ENABLE:-}"
 CMDLINE="${CMDLINE:-panic=10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused reboot=warm loglevel=7 console=tty0 fbcon=font:TER16x32 consoleblank=0 rdinit=/init}"
 IMAGE=angler-build:24.04
 DTB=qcom/msm8994-huawei-angler-rev-101.dtb
@@ -54,20 +57,11 @@ in_container "
   make ARCH=arm64 LLVM=1 O=$KERNEL_OUT INSTALL_MOD_PATH=$KERNEL_OUT/modules-staging INSTALL_MOD_STRIP=1 modules_install >/dev/null
   cp $KERNEL_OUT/arch/arm64/boot/dts/$DTB $KERNEL_OUT/angler.dtb
   fdtput -t i $KERNEL_OUT/angler.dtb / qcom,board-id $BOARD_ID 0
-  # The bootloader's splash buffer as a simplefb (N2): 1440x2560 RGB888 at
-  # 0x03400000, covered by the DTS's no-map dfps-data and cont_splash_mem
-  fb=/chosen/framebuffer@3400000
-  fdtput -t i $KERNEL_OUT/angler.dtb /chosen '#address-cells' 2
-  fdtput -t i $KERNEL_OUT/angler.dtb /chosen '#size-cells' 2
-  fdtput $KERNEL_OUT/angler.dtb /chosen ranges
-  fdtput -c $KERNEL_OUT/angler.dtb \$fb
-  fdtput -t s $KERNEL_OUT/angler.dtb \$fb compatible simple-framebuffer
-  fdtput -t x $KERNEL_OUT/angler.dtb \$fb reg 0 0x03400000 0 0x00a8c000
-  fdtput -t i $KERNEL_OUT/angler.dtb \$fb width 1440
-  fdtput -t i $KERNEL_OUT/angler.dtb \$fb height 2560
-  fdtput -t i $KERNEL_OUT/angler.dtb \$fb stride 4320
-  fdtput -t s $KERNEL_OUT/angler.dtb \$fb format r8g8b8
-  fdtput -t s $KERNEL_OUT/angler.dtb \$fb status okay
+  # The bootloader's splash buffer is a simplefb in the DTS (N2), with the
+  # MDSS clocks and GDSC that keep it alive once mmcc probes (GPU-PLAN G1)
+  fdtget $KERNEL_OUT/angler.dtb /chosen/framebuffer@3400000 compatible >/dev/null
+  # Bring-up nodes that are disabled in the DTS, by path (GPU-PLAN.md)
+  for n in $ENABLE; do fdtput -t s $KERNEL_OUT/angler.dtb \$n status okay; done
   # ramoops (crash logs across the warm reset): the last MiB of the splash
   # reservation, which the 1440x2560 buffer (to 0x03e8c000) doesn't use.
   # The known-good image reserves this range no-map, so it can read a crashed
