@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yassine Oudjana <y.oudjana@protonmail.com>
 Date: Sun, 21 Nov 2021 11:47:05 +0400
-Subject: [PATCH 04/20] dt-bindings: power: supply: Add DT schema for Qualcomm
+Subject: [PATCH 04/21] dt-bindings: power: supply: Add DT schema for Qualcomm
  SMBCHG
 
 Add DT schema for the switch-mode battery charger found on Qualcomm

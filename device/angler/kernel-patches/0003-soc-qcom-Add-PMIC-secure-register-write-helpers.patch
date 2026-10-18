@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yassine Oudjana <y.oudjana@protonmail.com>
 Date: Tue, 2 Aug 2022 13:05:51 +0100
-Subject: [PATCH 03/20] soc: qcom: Add PMIC secure register write helpers
+Subject: [PATCH 03/21] soc: qcom: Add PMIC secure register write helpers
 
 Some peripheral blocks in Qualcomm PMICs such as some in the
 switch-mode battery charger and fuel gauge of PMI8994 and later

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: chris <08a487@gmail.com>
 Date: Sun, 18 Oct 2026 02:53:11 -0600
-Subject: [PATCH 02/20] arm64: dts: qcom: msm8994-huawei-angler: Add
+Subject: [PATCH 02/21] arm64: dts: qcom: msm8994-huawei-angler: Add
  touchscreen
 
 The Nexus 6P has a Synaptics RMI4 touch controller at 0x70 on BLSP1 QUP2,

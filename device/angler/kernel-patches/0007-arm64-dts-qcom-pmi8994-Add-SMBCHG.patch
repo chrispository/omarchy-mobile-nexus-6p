@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yassine Oudjana <y.oudjana@protonmail.com>
 Date: Thu, 15 Jul 2021 09:19:40 +0400
-Subject: [PATCH 07/20] arm64: dts: qcom: pmi8994: Add SMBCHG
+Subject: [PATCH 07/21] arm64: dts: qcom: pmi8994: Add SMBCHG
 
 Add a node for the switch-mode battery charger available on
 this PMIC.

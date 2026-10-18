@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Caleb Connolly <caleb@connolly.tech>
 Date: Fri, 30 Apr 2021 08:58:31 +0530
-Subject: [PATCH 17/20] input: add Qualcomm SPMI haptics driver
+Subject: [PATCH 17/21] input: add Qualcomm SPMI haptics driver
 
 Add support for the haptics found in pmi8998 and related PMICs.
 Based on the ff-memless interface. Currently this driver provides

@@ -27,6 +27,12 @@ angler-03.78), with the reason for each. Plan and results:
   idle in WFI at full clock and cost about 165 mA, which stalls charging on a
   500 mA USB port. The default is the A53 cluster until there's power
   collapse or A57 cpufreq.
+- **Notification LED:** PMI8994 LPG channels 3/2/1 = red/green/blue. List
+  the multicolor subnodes red first: power-supply triggers pass intensities
+  in RGB order, not by colour id.
+- **Vibrator:** PMI8994 haptics (LRA), driver from msm8996 mainline. Stock
+  drives it at 1.2-1.8 V; the driver's own maximum is 3.6 V, so the DT
+  caps it (`qcom,vmax-mv`).
 - **lk2nd** needs this phone's board id (`lk2nd-patches/`); `fastboot boot
   lk2nd.img` works, but our kernel booted through it hung. Not needed now.
 - **The bootloader appends the serial number and Wi-Fi/BT MACs to the

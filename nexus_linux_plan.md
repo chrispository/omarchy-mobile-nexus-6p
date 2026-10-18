@@ -455,3 +455,9 @@ image, so the phone comes back to Linux with SSH.
 | H1 | `modprobe qcom_spmi_haptics; grep -A4 spmi_haptics /proc/bus/input/devices` | an `eventN` handler | no device | low |
 | H2 | `pacman -S linuxconsole` (with the proxy), then `fftest /dev/input/eventN`, effect 4 or 5 (rumble) | a short buzz; `dmesg` quiet | a buzz that doesn't stop: `rmmod qcom_spmi_haptics` | low (the human holds the phone) |
 | H3 | Pass: move the blacklist out (delete the bring-up file), and let the shell's feedback use it | the shell's haptic feedback works | | |
+- **Notification LED works:** PMI8994's LPG with the stock channel map (red
+  3, green 2, blue 1), checked colour by colour on the webcam. It shows the
+  charge state from boot (`qcom-battery-charging-orange-full-green`):
+  orange while charging, green when full. The subnodes are listed red
+  first, because that trigger gives its intensities in red, green, blue
+  order (blue first made "orange" cyan).

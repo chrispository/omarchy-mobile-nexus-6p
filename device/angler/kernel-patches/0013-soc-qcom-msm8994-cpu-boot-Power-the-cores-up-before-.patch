@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: chris <08a487@gmail.com>
 Date: Sun, 18 Oct 2026 08:15:17 -0600
-Subject: [PATCH 13/20] soc: qcom: msm8994-cpu-boot: Power the cores up before
+Subject: [PATCH 13/21] soc: qcom: msm8994-cpu-boot: Power the cores up before
  SMP init, add the A57 cluster
 
 Cores brought up after boot are checked against the CPU errata and

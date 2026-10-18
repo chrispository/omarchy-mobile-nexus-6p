@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Yassine Oudjana <y.oudjana@protonmail.com>
 Date: Mon, 23 Aug 2021 07:20:07 +0400
-Subject: [PATCH 08/20] dt-bindings: power: supply: Add DT schema for qcom,fg
+Subject: [PATCH 08/21] dt-bindings: power: supply: Add DT schema for qcom,fg
 
 Add a DT schema for Qualcomm PMIC fuel gauge.
 
