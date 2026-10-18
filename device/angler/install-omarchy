@@ -1,0 +1,83 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Put Omarchy and Omarchy Mobile on the Nexus 6P's Arch root (nexus_linux_plan.md
+# N3b), the way tools/build-rootfs builds a phone image, but on the running
+# phone over USB SSH (the phone is the only builder of its root; there is no
+# image for this device yet).
+#
+#   device/angler/install-omarchy USERNAME [CREDENTIAL]
+#
+# Needs: the phone in Arch (device/angler/install-arch-root, then a boot
+# without ramroot), device/angler/tools/proxy running (internet for pacman),
+# Omarchy's keyring on this machine (/usr/share/pacman/keyrings/omarchy*), and
+# out/repo built with tools/build-packages:
+#   packages/omamobile-keyring omamobile-omarchy omamobile-owl-widgets neard
+#   omacam omamobile-apps omamobile-shell omamobile-mirror omamobile-firstboot
+#   omamobile-device-angler
+# It asks for the user's password or PIN (CREDENTIAL pin, the default, or
+# password) and writes firstboot.conf; omamobile-firstboot then creates the
+# user, enables SDDM autologin into Hyprland and turns ufw on with SSH allowed
+# on usb0 (omamobile-device-angler adds DHCP on usb0), at the next boot.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+cd "$ROOT"
+USERNAME=${1:?usage: install-omarchy USERNAME [pin|password]}
+CREDENTIAL=${2:-pin}
+SSH=(tools/phone-ssh)
+say() { printf '\e[1m==> %s\e[0m\n' "$*"; }
+die() { printf '\e[31merror:\e[0m %s\n' "$*" >&2; exit 1; }
+
+[[ -f out/repo/aarch64/omamobile.db ]] || die "no out/repo: run tools/build-packages first"
+"${SSH[@]}" '[ -d /run/systemd/system ]' || die "the phone is not in its Arch root"
+"${SSH[@]}" 'curl -s -m 10 -o /dev/null -x socks5h://127.0.0.1:1080 http://mirror.archlinuxarm.org' ||
+  die "no internet on the phone: run device/angler/tools/proxy"
+read -rsp "$CREDENTIAL for $USERNAME on the phone: " secret; echo
+hash=$(openssl passwd -6 -stdin <<<"$secret"); unset secret
+
+say "Omarchy's keyring and [omarchy] (edge: the channel with aarch64 builds)"
+tar -C /usr/share/pacman/keyrings -cf - omarchy.gpg omarchy-trusted omarchy-revoked |
+  "${SSH[@]}" 'set -e; d=$(mktemp -d); tar -xf - -C $d
+    pacman-key --add $d/omarchy.gpg >/dev/null 2>&1
+    for k in $(cut -d: -f1 $d/omarchy-trusted); do pacman-key --lsign-key $k >/dev/null 2>&1; done
+    grep -q "^\[omarchy\]" /etc/pacman.conf ||
+      sed -i "0,/^\[core\]/s//[omarchy]\nServer = https:\/\/pkgs.omarchy.org\/edge\/\$arch\n\n[core]/" /etc/pacman.conf'
+
+say "This fork's signing key, the [omamobile] repository and the device package"
+GNUPGHOME=$ROOT/keys/gnupg gpg --batch --armor --export "$(cat keys/fingerprint)" |
+  "${SSH[@]}" "pacman-key --add - >/dev/null 2>&1 && pacman-key --lsign-key $(cat keys/fingerprint) >/dev/null 2>&1"
+tools/repo-push >/dev/null 2>&1
+"${SSH[@]}" 'set -e; R=/var/lib/omamobile/repo/aarch64
+  install -Dm644 /dev/null /etc/NetworkManager/conf.d/10-omamobile-usb.conf
+  printf "[keyfile]\nunmanaged-devices=interface-name:usb0\n" > /etc/NetworkManager/conf.d/10-omamobile-usb.conf
+  pacman -U --noconfirm --disable-sandbox --needed $R/omamobile-keyring-*.pkg.tar.zst $R/omamobile-device-angler-*.pkg.tar.zst
+  rm -f /etc/NetworkManager/conf.d/10-omamobile-usb.conf'
+
+skip=$(grep -v '^#' rootfs/packages.omarchy-skip | tr '\n' ' ')
+say "Omarchy (rootfs/packages.base, then Omarchy's own list) and Omarchy Mobile"
+"${SSH[@]}" "cat > /root/omarchy-install.sh" <<EOF
+#!/bin/bash
+set -uo pipefail
+export all_proxy=socks5h://127.0.0.1:1080
+P="pacman --noconfirm --disable-sandbox --needed --ask 4"
+\$P -Syu base sudo openssh networkmanager ufw iptables-nft sddm e2fsprogs kmod python polkit pciutils usbutils less wireless-regdb archlinuxarm-keyring omarchy-keyring omarchy omarchy-settings || { echo BASE-FAILED; exit 1; }
+# ALARM's own kernel never boots here, and its mkinitcpio fails on Omarchy's hooks
+pacman -Q linux-aarch64 >/dev/null 2>&1 && pacman -Rdd --noconfirm linux-aarch64
+skip=" $skip "
+want=()
+while read -r p; do
+  [[ -z \$p || \$p == \#* || \$skip == *" \$p "* ]] && continue
+  pacman -Si "\$p" >/dev/null 2>&1 && want+=("\$p")
+done < /usr/share/omarchy/install/omarchy-base.packages
+\$P -S "\${want[@]}" || { echo OMARCHY-LIST-FAILED; exit 1; }
+\$P -S omamobile-omarchy omamobile-owl-widgets omamobile-mirror omamobile-firstboot omamobile-apps omamobile-shell || { echo OMAMOBILE-FAILED; exit 1; }
+echo INSTALL-DONE
+EOF
+"${SSH[@]}" 'chmod 755 /root/omarchy-install.sh; systemd-run --wait --unit=x-omarchy -p StandardOutput=file:/root/omarchy-install.log -p StandardError=inherit /root/omarchy-install.sh >/dev/null; tail -1 /root/omarchy-install.log' |
+  grep -q INSTALL-DONE || die "the install failed: see /root/omarchy-install.log on the phone"
+
+say "firstboot.conf (omamobile-firstboot runs at the next boot)"
+{ echo "USERNAME=$USERNAME"; echo "PASSWORD_HASH=$hash"; echo "HOSTNAME=angler"
+  echo "TIMEZONE=$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)"
+  echo "CREDENTIAL=$CREDENTIAL"; for k in "$HOME"/.ssh/*.pub; do echo "SSH_KEY=$(cat "$k")"; done
+} | "${SSH[@]}" 'install -Dm600 /dev/stdin /etc/omamobile/firstboot.conf && omamobile-firstboot --check | head -3'
+say "Done. Reboot the phone (device/angler/tools/cycle) for firstboot and the session."

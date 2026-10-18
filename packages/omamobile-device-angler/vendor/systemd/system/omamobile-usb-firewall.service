@@ -1,0 +1,14 @@
+[Unit]
+Description=Let the desktop's DHCP requests in on the USB link (usb0)
+Documentation=file:///usr/share/omamobile/device-angler/version
+After=ufw.service
+ConditionPathExists=/usr/bin/ufw
+
+[Service]
+Type=oneshot
+# The phone is the DHCP server on usb0 (20-usb-gadget.network). omamobile-
+# firstboot's ufw allows only SSH there, so the desktop's lease couldn't renew.
+ExecStart=/usr/bin/omamobile-usb-firewall
+
+[Install]
+WantedBy=multi-user.target

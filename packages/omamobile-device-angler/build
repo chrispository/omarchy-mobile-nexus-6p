@@ -1,0 +1,11 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Compile the C tools into BUILDDIR (default: build). device/angler/build-n1
+# builds the same sources statically for the initramfs.
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+out=${1:-build}
+mkdir -p "$out"
+for tool in reboot-to fbkick peek memdump; do
+  ${CC:-cc} ${CFLAGS:--O2} -Wall -Wextra -o "$out/$tool" "src/$tool.c" ${LDFLAGS:-}
+done

@@ -59,16 +59,20 @@ say "Unpacking $TARBALL"
 "${SSH[@]}" 'mkdir -p /mnt/root && mount -t ext4 -o rw,noatime /dev/by-name/userdata /mnt/root'
 "${SSH[@]}" 'tar -xzp --xattrs --xattrs-include="*" --numeric-owner -C /mnt/root -f -' < "$DL/$TARBALL"
 
-say "Angler overlay"
-tar -C "$DEV/rootfs" --owner=0 --group=0 -cf - . | "${SSH[@]}" 'tar -xp --no-same-owner -C /mnt/root -f - && chown -R 0:0 /mnt/root/etc/systemd/system/omamobile-boot-ok.service'
+say "Angler files"
+# The device package's files, staged from its own install script with the
+# static tools build-n1 compiled; installing the package later takes them over
+# (pacman -U --overwrite). Plus the overlay (hostname).
+KOUT="${KERNEL_OUT:-$HOME/android/mainline/out-angler-boot}"
+for t in reboot-to fbkick peek memdump; do [[ -x $KOUT/$t ]] || die "no $KOUT/$t: run build-n1 first"; done
+stage=$(mktemp -d); trap 'rm -rf "$gnupg" "$stage"' EXIT
+"$DEV/../../packages/omamobile-device-angler/install" "$stage" "$KOUT"
+cp -a "$DEV/rootfs/." "$stage/"
+tar -C "$stage" --owner=0 --group=0 -cf - . | "${SSH[@]}" 'tar -xp --no-same-owner -C /mnt/root -f -'
 cat "$HOME"/.ssh/*.pub | "${SSH[@]}" 'install -d -m 700 /mnt/root/root/.ssh && cat > /mnt/root/root/.ssh/authorized_keys && chmod 600 /mnt/root/root/.ssh/authorized_keys'
 "${SSH[@]}" sh -s <<'EOF'
 set -e
 r=/mnt/root
-# Units: boot-ok and a serial login on the USB ACM port
-ln -sf /etc/systemd/system/omamobile-boot-ok.service $r/etc/systemd/system/multi-user.target.wants/
-mkdir -p $r/etc/systemd/system/getty.target.wants
-ln -sf /usr/lib/systemd/system/serial-getty@.service $r/etc/systemd/system/getty.target.wants/serial-getty@ttyGS0.service
 # No password logins: lock the image's default alarm and root passwords
 sed -i -E 's/^(root|alarm):[^:]*:/\1:!:/' $r/etc/shadow
 # The image's kernel is for other boards; this phone boots ours

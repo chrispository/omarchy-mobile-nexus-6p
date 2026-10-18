@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: MIT
+pkgname=omamobile-device-angler
+pkgver=$(cat "${startdir:-.}/version")
+pkgrel=1
+pkgdesc="Omarchy Mobile support for the Google Nexus 6P (angler): storage guard, USB networking, boot marker, display kick and reboot tools"
+arch=(aarch64)
+url="https://github.com/chrispository/omarchy-mobile-nexus-6p"
+license=(MIT)
+depends=(bash systemd util-linux)
+backup=(etc/pacman.d/omamobile-mirrorlist)
+install=omamobile-device-angler.install
+makedepends=(gcc)
+
+build() {
+  "$startdir/build" "$srcdir/build"
+}
+
+check() {
+  "$startdir/test/all"
+}
+
+package() {
+  "$startdir/install" "$pkgdir" "$srcdir/build"
+}

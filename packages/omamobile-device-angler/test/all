@@ -1,0 +1,41 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Tests for omamobile-device-angler, from a copy of this directory alone.
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
+pass() { printf 'ok - %s\n' "$1"; }
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+
+for script in bin/* build install; do bash -n "$script" || fail "$script parses"; done
+pass "scripts parse"
+
+./build "$tmp/build" || fail "C tools compile"
+pass "C tools compile"
+
+# reboot-to only knows its three reasons and refuses anything else
+"$tmp/build/reboot-to" fastboot 2>/dev/null && fail "reboot-to accepted an unknown reason"
+pass "reboot-to refuses unknown reasons"
+
+# The storage guard never exempts anything but userdata, never touches RPMB,
+# and never sets a whole disk read-only (that would take userdata with it)
+rules=vendor/udev/rules.d/50-omamobile-emmc-ro.rules
+grep -c 'PARTNAME}!="userdata"' "$rules" >/dev/null || fail "guard exempts userdata only"
+grep -c 'KERNEL!="\*rpmb\*"' "$rules" >/dev/null || fail "guard skips RPMB"
+grep -c 'DEVTYPE}=="partition"' "$rules" >/dev/null || fail "guard is per partition"
+pass "storage guard rules"
+
+./install "$tmp/dest" "$tmp/build"
+for f in usr/bin/reboot-to usr/bin/fbkick usr/bin/omamobile-boot-ok \
+         usr/lib/systemd/system/omamobile-boot-ok.service \
+         usr/lib/systemd/system/multi-user.target.wants/omamobile-boot-ok.service \
+         usr/lib/systemd/network/20-usb-gadget.network \
+         usr/lib/NetworkManager/conf.d/10-omamobile-usb.conf \
+         etc/ssh/sshd_config.d/10-omamobile-angler.conf; do
+  [[ -e $tmp/dest/$f ]] || fail "installs $f"
+done
+pass "install layout"
+
+# The display runs on the bootloader's MDSS state: its clock driver stays out
+grep -qx 'blacklist mmcc_msm8994' vendor/modprobe.d/omamobile-angler.conf || fail "mmcc-msm8994 blacklisted"
+pass "display clocks blacklisted"

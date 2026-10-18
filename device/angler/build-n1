@@ -9,16 +9,19 @@
 #   KERNEL_OUT  build output        (default ~/android/mainline/out-angler-boot)
 #   BOARD_ID    qcom,board-id       (default 0x1f57, ANGLER-VN2; fastboot getvar
 #                                    hardware-revision tells which board a phone is)
-#   CMDLINE     kernel command line
+#   CMDLINE     kernel command line (reboot=warm: the PMIC power-key driver
+#               otherwise makes every restart a hard reset, which loses the
+#               IMEM restart reason reboot-to writes)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
 DEV="$ROOT/device/angler"
+PKG="$ROOT/packages/omamobile-device-angler"   # the C tools
 WORK="${WORK:-$HOME/android}"
 KERNEL_DIR="${KERNEL_DIR:-$WORK/mainline/linux-angler}"
 KERNEL_OUT="${KERNEL_OUT:-$WORK/mainline/out-angler-boot}"
 BOARD_ID="${BOARD_ID:-0x1f57}"
-CMDLINE="${CMDLINE:-maxcpus=4 panic=10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused loglevel=7 console=tty0 fbcon=font:TER16x32 consoleblank=0 rdinit=/init}"
+CMDLINE="${CMDLINE:-maxcpus=4 panic=10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused reboot=warm loglevel=7 console=tty0 fbcon=font:TER16x32 consoleblank=0 rdinit=/init}"
 IMAGE=angler-build:24.04
 DTB=qcom/msm8994-huawei-angler-rev-101.dtb
 # The bootloader unpacks the kernel at 0x8000 and puts the DTB at 0x01e00000:
@@ -46,7 +49,9 @@ in_container "
   make ARCH=arm64 LLVM=1 O=$KERNEL_OUT defconfig >/dev/null
   scripts/kconfig/merge_config.sh -m -O $KERNEL_OUT $KERNEL_OUT/.config $DEV/kernel.config >/dev/null
   make ARCH=arm64 LLVM=1 O=$KERNEL_OUT olddefconfig >/dev/null
-  make ARCH=arm64 LLVM=1 O=$KERNEL_OUT -j\$(nproc) Image.gz $DTB
+  make ARCH=arm64 LLVM=1 O=$KERNEL_OUT -j\$(nproc) Image.gz $DTB modules
+  rm -rf $KERNEL_OUT/modules-staging
+  make ARCH=arm64 LLVM=1 O=$KERNEL_OUT INSTALL_MOD_PATH=$KERNEL_OUT/modules-staging INSTALL_MOD_STRIP=1 modules_install >/dev/null
   cp $KERNEL_OUT/arch/arm64/boot/dts/$DTB $KERNEL_OUT/angler.dtb
   fdtput -t i $KERNEL_OUT/angler.dtb / qcom,board-id $BOARD_ID 0
   # The bootloader's splash buffer as a simplefb (N2): 1440x2560 RGB888 at
@@ -74,10 +79,10 @@ in_container "
   fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/ramoops@4000000 record-size 0x20000
   fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/ramoops@4000000 console-size 0x80000
   fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/ramoops@4000000 pmsg-size 0
-  aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/memdump $DEV/tools/memdump.c
-  aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/fbkick $DEV/tools/fbkick.c
-  aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/peek $DEV/tools/peek.c
-  aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/reboot-to $DEV/tools/reboot-to.c
+  aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/memdump $PKG/src/memdump.c
+  aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/fbkick $PKG/src/fbkick.c
+  aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/peek $PKG/src/peek.c
+  aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/reboot-to $PKG/src/reboot-to.c
 "
 # The fragment must have survived olddefconfig (a missing dependency drops a
 # symbol silently)
@@ -118,6 +123,12 @@ mkdir -p "$stage/root/.ssh"
 cat "$HOME"/.ssh/*.pub > "$stage/root/.ssh/authorized_keys"
 chmod 700 "$stage/root/.ssh" && chmod 600 "$stage/root/.ssh/authorized_keys"
 (cd "$stage" && find . | cpio -o -H newc --owner=0:0 --quiet) | gzip -9 > "$KERNEL_OUT/initramfs.cpio.gz"
+
+# Modules for the Arch root (/usr/lib/modules/<release>): the boot image
+# stays small and the initramfs needs none. tools/modules-push installs them.
+rel=$(cat "$KERNEL_OUT/include/config/kernel.release")
+tar -C "$KERNEL_OUT/modules-staging/lib/modules" --owner=0 --group=0 -cf - "$rel" | zstd -q -T0 -f -o "$KERNEL_OUT/modules-$rel.tar.zst"
+say "Modules: $KERNEL_OUT/modules-$rel.tar.zst ($(du -h "$KERNEL_OUT/modules-$rel.tar.zst" | cut -f1))"
 
 say "Boot image"
 cat "$KERNEL_OUT/arch/arm64/boot/Image.gz" "$KERNEL_OUT/angler.dtb" > "$KERNEL_OUT/Image.gz-dtb"

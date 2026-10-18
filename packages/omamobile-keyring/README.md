@@ -6,4 +6,6 @@ database, in pacman's keyring format. Installing it runs
 (`omamobile-trusted`), the same way `archlinux-keyring` works.
 
 The private key never leaves the build machine (`keys/`, ignored by git).
-Fingerprint: `6C84FE3D240709E70E27CC94B301F5EA62B249FE`.
+Fingerprints: `6C84FE3D240709E70E27CC94B301F5EA62B249FE` (upstream Omarchy
+Mobile) and `4CBE6588AB67096045F27F7CD2613F961A84946B` (this fork's Nexus 6P
+builds, chrispository/omarchy-mobile-nexus-6p).

@@ -1,0 +1,17 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Desktop side (nexus_linux_plan.md): install the kernel build's modules into
+# the Arch root on the phone (/usr/lib/modules/<release>), replacing an older
+# copy of the same release. Run it while the phone is in Arch.
+set -euo pipefail
+KERNEL_OUT="${KERNEL_OUT:-$HOME/android/mainline/out-angler-boot}"
+rel=$(cat "$KERNEL_OUT/include/config/kernel.release")
+tarball="$KERNEL_OUT/modules-$rel.tar.zst"
+[[ -f $tarball ]] || { echo "no $tarball: run build-n1" >&2; exit 1; }
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@172.16.42.1 "
+  set -e
+  [ -d /run/systemd/system ] || { echo 'not in the Arch root' >&2; exit 1; }
+  rm -rf /usr/lib/modules/$rel.new && mkdir -p /usr/lib/modules/$rel.new
+  zstd -dc | tar -x -C /usr/lib/modules/$rel.new
+  rm -rf /usr/lib/modules/$rel && mv /usr/lib/modules/$rel.new/$rel /usr/lib/modules/$rel && rmdir /usr/lib/modules/$rel.new
+  depmod $rel && echo \"modules $rel: \$(find /usr/lib/modules/$rel -name '*.ko*' | wc -l)\"" < "$tarball"

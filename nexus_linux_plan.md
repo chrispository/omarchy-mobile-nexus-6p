@@ -2,10 +2,11 @@
 # Nexus 6P Linux and Omarchy Mobile feasibility plan
 
 **Status (2026-10-18): N1 passes; N2a (text console) passes; N3a (Arch
-root on userdata) passes.** The test handset boots mainline Linux, switches to
-Arch Linux ARM on the userdata partition with systemd, and is reached over USB
-SSH, on one CPU, with a kernel console on the panel through the bootloader's
-framebuffer and every other eMMC partition read-only. See the results at the end. No device support is
+root on userdata) passes; N3b (Omarchy Mobile shell on the panel) passes in
+software rendering.** The test handset boots mainline Linux into Arch Linux ARM
+on userdata with Omarchy and the Omarchy Mobile shell, autologged in through
+SDDM into Hyprland on simpledrm, with touch detected, on one CPU, reached over
+USB SSH, every other eMMC partition read-only. See the results at the end. No device support is
 claimed. Proposed kernel branch: `omamobile-angler-boot`; proposed worktree:
 `~/android/mainline/wt-angler-boot`; proposed output:
 `~/android/mainline/out-angler-boot`. These are reserved names, not existing
@@ -284,3 +285,29 @@ graphics cannot be demonstrated, pause Omarchy integration and scope the missing
 kernel work explicitly. Passing N3 establishes a prototype; reliable charging,
 thermal behavior, recovery and suspend are needed before calling it a useful
 handheld. Telephony needs separate evidence before calling it a phone.
+
+### 2026-10-18: N3b, Omarchy and the Omarchy Mobile shell
+
+- **Pass, software-rendered.** `7.3.0-rc7-angler+` (kernel branch
+  `omamobile-angler`: PM8994 regulators, touchscreen). SDDM autologs the user
+  into Hyprland 0.56 on simpledrm (no GPU renderer: aquamarine finds none, and
+  frames are software-rendered); fbkick pushes them to the command-mode panel.
+  The Omarchy Mobile home screen (status bar, notifications, dock, launcher)
+  shows on the panel, checked by webcam and `grim`.
+- **Installed on the phone itself** (`device/angler/install-omarchy`): Omarchy
+  4.0.4 from `[omarchy]` edge, Omarchy's own package list (all but `nvim` and
+  `dotnet-runtime` are built for aarch64), and `[omamobile]` built on the
+  desktop with `tools/build-packages` (signed with this fork's key, added to
+  `omamobile-keyring`): `omamobile-omarchy` (13 patches applied, none upstream
+  yet), `-shell`, `-apps`, `-owl-widgets`, `-mirror`, `-firstboot`, `neard`,
+  `omacam`, and the new `omamobile-device-angler`. Not built: Mesa, Hyprland
+  and libcamera (Arch Linux ARM's are used), and the Pixel-only packages.
+- **Touch:** Synaptics S3718AR (RMI4 F12) registers as an input device; not
+  yet tried by hand.
+- **Found on the way:** `reboot=warm` (a hard reset loses the IMEM restart
+  reason), modules in the Arch root, ufw's kernel needs, the usb0 DHCP rule,
+  and DPMS off blanking simpledrm (details in `device/angler/NOTES.md`).
+- **Next:** touch by hand; performance (one A53 at 1440x2560 in software);
+  the msm DRM driver for the panel and the Adreno 430 for real rendering;
+  SMP; battery, charging and Wi-Fi.
+

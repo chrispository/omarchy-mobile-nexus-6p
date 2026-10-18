@@ -1,0 +1,8 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Allow DHCP (the phone serves the desktop's address) on usb0 when ufw is
+# active, once. SSH on usb0 is omamobile-firstboot's rule.
+set -euo pipefail
+ufw status | grep -q '^Status: active' || exit 0
+ufw status | grep -q '^67/udp on usb0 ' && exit 0
+ufw allow in on usb0 to any port 67 proto udp

@@ -26,6 +26,10 @@ angler-03.78), with the reason for each. Plan and results:
   in 30 minutes; `-T 1` bit 176 s after the feeder stopped and the phone came
   back from `boot`. So a driver second is about three real minutes. The bark
   IRQ never fired.
+- **Boot with `reboot=warm`:** once `qcom-pon` lets the PMIC power-key driver
+  probe, its reboot notifier makes every restart a PMIC hard reset unless
+  `reboot_mode` is warm. A hard reset loses the IMEM restart reason: the
+  phone powered off and came back with bootreason `charge`.
 - **`switch_root` frees the initramfs:** a background loop that calls
   `sleep` or `grep` spins once they are gone (the USB self-recovery loop would
   reach its `sysrq c` at once). Stop them before switching; only builtins and
@@ -52,6 +56,22 @@ angler-03.78), with the reason for each. Plan and results:
   `all_proxy=socks5h://127.0.0.1:1080` on the phone
   (`/etc/profile.d/omamobile-proxy.sh`). There's no RTC: set the clock from
   the desktop (`date -u -s @$(date +%s)`).
+
+- **Kernel modules live in the Arch root** (`/usr/lib/modules/<release>`,
+  `tools/modules-push`); the boot image stays under its size limit and the
+  initramfs needs none. Push them with every kernel build.
+- **Blacklist `mmcc_msm8994`, `ocmem`, `rmtfs_mem`** (omamobile-device-angler):
+  udev would load them for existing DT nodes, and the multimedia clock driver
+  could gate the bootloader-configured display.
+- **ufw needs nftables, `nft_compat` and the xtables matches as modules**,
+  `ip6t_rt` among them (`before6.rules` drops RH0 with `-m rt`). A failed ufw
+  start left `deny incoming` with none of the allow rules, so SSH on usb0 was
+  cut; the way back in was the USB serial console (`ttyGS0` getty, logged in
+  as the user, from a container with `--device /dev/ttyACM0`).
+- **The phone serves the desktop's address on usb0** (networkd DHCP server),
+  so ufw must allow 67/udp there (`omamobile-usb-firewall.service`).
+- **Omarchy's idle handling turns DPMS off,** and simpledrm blanks the panel
+  then. `hyprctl dispatch 'hl.dsp.dpms({ action = "enable" })'` lights it.
 
 ## Display (MDSS 1.9, dual-DSI command-mode panel)
 
