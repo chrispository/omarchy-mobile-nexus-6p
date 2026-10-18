@@ -21,7 +21,7 @@ WORK="${WORK:-$HOME/android}"
 KERNEL_DIR="${KERNEL_DIR:-$WORK/mainline/linux-angler}"
 KERNEL_OUT="${KERNEL_OUT:-$WORK/mainline/out-angler-boot}"
 BOARD_ID="${BOARD_ID:-0x1f57}"
-CMDLINE="${CMDLINE:-maxcpus=4 panic=10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused reboot=warm loglevel=7 console=tty0 fbcon=font:TER16x32 consoleblank=0 rdinit=/init}"
+CMDLINE="${CMDLINE:-maxcpus=1 panic=10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused reboot=warm loglevel=7 console=tty0 fbcon=font:TER16x32 consoleblank=0 rdinit=/init}"
 IMAGE=angler-build:24.04
 DTB=qcom/msm8994-huawei-angler-rev-101.dtb
 # The bootloader unpacks the kernel at 0x8000 and puts the DTB at 0x01e00000:
@@ -84,6 +84,14 @@ in_container "
   fdtput -c $KERNEL_OUT/angler.dtb /reserved-memory/spin-table@62ff000
   fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/spin-table@62ff000 reg 0 0x062ff000 0 0x1000
   fdtput $KERNEL_OUT/angler.dtb /reserved-memory/spin-table@62ff000 no-map
+  # Without lk2nd: the CPUs use spin-table with the release address at 0x88
+  # of that page, and msm8994-cpu-boot.ko powers the A53 cores up into it
+  # (maxcpus=1 on the cmdline: they come online through sysfs after that)
+  for c in \$(fdtget -l $KERNEL_OUT/angler.dtb /cpus | grep '^cpu@'); do
+    fdtput -t s $KERNEL_OUT/angler.dtb /cpus/\$c enable-method spin-table
+    fdtput -t x $KERNEL_OUT/angler.dtb /cpus/\$c cpu-release-addr 0 0x062ff088
+  done
+  fdtput -t s $KERNEL_OUT/angler.dtb /psci status disabled
   aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/memdump $PKG/src/memdump.c
   aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/fbkick $PKG/src/fbkick.c
   aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/peek $PKG/src/peek.c

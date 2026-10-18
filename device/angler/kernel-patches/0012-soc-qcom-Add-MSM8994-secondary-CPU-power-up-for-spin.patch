@@ -1,0 +1,292 @@
+From 0ea1d73d63ccd2cab5ee35789bdc92574158b1ce Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 05:45:24 -0600
+Subject: [PATCH 12/12] soc: qcom: Add MSM8994 secondary CPU power-up for
+ spin-table
+
+The TZ firmware of the Huawei Nexus 6P (MSM8994) has no PSCI, so only the
+boot CPU runs. Its downstream kernel points the cores' cold-boot address at
+the kernel through SCM and powers them up through their ACC registers
+(drivers/soc/qcom/cpu_pwr_ctl.c and cpu_ops.c, android-msm-angler-3.10).
+
+Do the same for arm64's spin-table enable method: put a spin loop in a
+reserved page whose 0x88 offset is the CPUs' cpu-release-addr, set it as the
+cold-boot address with a physical-address variant of the SCM SET_ADDR_MC
+call, and power up the A53 cores (CPU1-3), whose L2 already runs. They then
+wait in the kernel's holding pen until onlined through sysfs. The A57
+cluster needs its L2 and clock as well and is left alone.
+---
+ drivers/firmware/qcom/qcom_scm.c       |  25 ++++
+ drivers/soc/qcom/Kconfig               |   8 ++
+ drivers/soc/qcom/Makefile              |   1 +
+ drivers/soc/qcom/msm8994-cpu-boot.c    | 181 +++++++++++++++++++++++++
+ include/linux/firmware/qcom/qcom_scm.h |   1 +
+ 5 files changed, 216 insertions(+)
+ create mode 100644 drivers/soc/qcom/msm8994-cpu-boot.c
+
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+index 3eaa4c9cc..499701f2c 100644
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -461,6 +461,31 @@ int qcom_scm_set_warm_boot_addr(void *entry)
+ }
+ EXPORT_SYMBOL_GPL(qcom_scm_set_warm_boot_addr);
+ 
++/**
++ * qcom_scm_set_boot_addr_mc_phys() - Set the boot address of all CPUs
++ * @addr:	physical entry address (need not be in the linear map)
++ * @flags:	QCOM_SCM_BOOT_MC_FLAG_* (and BIT(0) for an AArch64 entry)
++ *
++ * For firmware without PSCI, where the kernel powers up the cores itself and
++ * they enter from a reserved page that the linear map does not cover.
++ */
++int qcom_scm_set_boot_addr_mc_phys(phys_addr_t addr, unsigned int flags)
++{
++	struct qcom_scm_desc desc = {
++		.svc = QCOM_SCM_SVC_BOOT,
++		.cmd = QCOM_SCM_BOOT_SET_ADDR_MC,
++		.owner = ARM_SMCCC_OWNER_SIP,
++		.arginfo = QCOM_SCM_ARGS(6),
++		.args = { addr, ~0ULL, ~0ULL, ~0ULL, ~0ULL, flags },
++	};
++
++	if (!__scm || __get_convention() == SMC_CONVENTION_LEGACY)
++		return -EOPNOTSUPP;
++
++	return qcom_scm_call(__scm->dev, &desc, NULL);
++}
++EXPORT_SYMBOL_GPL(qcom_scm_set_boot_addr_mc_phys);
++
+ /**
+  * qcom_scm_set_cold_boot_addr() - Set the cold boot address for all cpus
+  * @entry: Entry point function for the cpus
+diff --git a/drivers/soc/qcom/Kconfig b/drivers/soc/qcom/Kconfig
+index 844c32d81..579b5fc7b 100644
+--- a/drivers/soc/qcom/Kconfig
++++ b/drivers/soc/qcom/Kconfig
+@@ -122,6 +122,14 @@ config QCOM_PMIC_GLINK
+ 	  Say yes here to support USB-C and battery status on modern Qualcomm
+ 	  platforms.
+ 
++config QCOM_MSM8994_CPU_BOOT
++	tristate "MSM8994 secondary CPU power-up without PSCI"
++	depends on ARM64 && QCOM_SCM && OF
++	help
++	  Power up the secondary Cortex-A53 cores of MSM8994 devices whose TZ
++	  firmware has no PSCI (such as the Huawei Nexus 6P), for the
++	  spin-table enable method. Bring them online through sysfs afterwards.
++
+ config QCOM_PMIC_SEC_WRITE
+ 	tristate
+ 	depends on REGMAP
+diff --git a/drivers/soc/qcom/Makefile b/drivers/soc/qcom/Makefile
+index 658b65b12..d09c2fb6f 100644
+--- a/drivers/soc/qcom/Makefile
++++ b/drivers/soc/qcom/Makefile
+@@ -42,3 +42,4 @@ obj-$(CONFIG_QCOM_INLINE_CRYPTO_ENGINE)	+= qcom_ice.o
+ obj-$(CONFIG_QCOM_PBS) +=	qcom-pbs.o
+ obj-$(CONFIG_QCOM_PMIC_SEC_WRITE)	+= pmic-sec-write.o
+ obj-$(CONFIG_QCOM_UBWC_CONFIG) += ubwc_config.o
++obj-$(CONFIG_QCOM_MSM8994_CPU_BOOT)	+= msm8994-cpu-boot.o
+diff --git a/drivers/soc/qcom/msm8994-cpu-boot.c b/drivers/soc/qcom/msm8994-cpu-boot.c
+new file mode 100644
+index 000000000..0aaa482cc
+--- /dev/null
++++ b/drivers/soc/qcom/msm8994-cpu-boot.c
+@@ -0,0 +1,181 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Power up the secondary Cortex-A53 cores of MSM8994 on firmware without PSCI.
++ *
++ * The TZ firmware of devices such as the Huawei Nexus 6P (angler) has no PSCI,
++ * so only the boot CPU runs. Its downstream kernel sets the cores' boot
++ * address through SCM and powers them up through their ACC registers itself
++ * (drivers/soc/qcom/cpu_pwr_ctl.c and cpu_ops.c in Google's
++ * android-msm-angler-3.10 kernel). This driver does the same for arm64's
++ * "spin-table" enable method:
++ *
++ *  - the DT describes the CPUs with enable-method "spin-table" and a
++ *    cpu-release-addr at offset 0x88 of a reserved "spin-table" page;
++ *  - at boot the kernel writes the address of its holding pen there;
++ *  - this driver puts a small spin loop at the start of the page, points
++ *    the cores' cold-boot address at it through SCM and powers the cores up:
++ *    each one spins until the release address is set, then enters the pen;
++ *  - "echo 1 > /sys/devices/system/cpu/cpuN/online" brings it into Linux.
++ *
++ * Only the A53 cluster (CPU1-3), whose L2 is already powered because the boot
++ * CPU runs there, is handled. The A57 cluster also needs its L2 and clock.
++ */
++
++#include <linux/bits.h>
++#include <linux/delay.h>
++#include <linux/firmware/qcom/qcom_scm.h>
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_address.h>
++
++#define ACC_BASE(cpu)		(0xf908b000 + (cpu) * 0x10000)
++#define LDO_BASE(cpu)		(0xf9070000 + (cpu) * 0x1000)
++#define L2_PWR_SEC_REG		0xf911210c	/* through SCM IO */
++
++#define CPU_PWR_CTL		0x4
++#define CPU_PWR_GATE_CTL	0x14
++
++#define APC_LDO_VREF_CFG	0x4
++#define APC_LDO_CFG1		0xc
++#define APC_LDO_CFG2		0x10
++#define APC_LDO_BHS_PWR_CTL	0x28
++#define LDO_VREF_RET		0x2a
++
++#define SCM_BOOT_MC_FLAGS	0x3	/* cold boot, AArch64 (HLOS) */
++#define RELEASE_OFFSET		0x88
++
++static unsigned int cpus = 0x0e;
++module_param(cpus, uint, 0444);
++MODULE_PARM_DESC(cpus, "Mask of CPUs to power up (A53 cluster only: 0x0e)");
++
++/* wfe; ldr x30, [pc, #0x84] (release address at 0x88); cbz x30, 0; br x30 */
++static const u32 spin_code[] = { 0xd503205f, 0x5800043e, 0xb4ffffde, 0xd61f03c0 };
++
++static void msm8994_ldo_config(unsigned int cpu)
++{
++	void __iomem *ldo = ioremap(LDO_BASE(cpu), SZ_4K);
++	u32 val;
++
++	if (!ldo)
++		return;
++	/* As cpu_pwr_ctl.c: reset value, LDO configuration, retention voltage */
++	val = readl_relaxed(ldo + APC_LDO_BHS_PWR_CTL);
++	writel_relaxed((val & 0xffffff00) | 0x12, ldo + APC_LDO_BHS_PWR_CTL);
++	val = readl_relaxed(ldo + APC_LDO_CFG1);
++	writel_relaxed((val & 0xffffff00) | 0xc2, ldo + APC_LDO_CFG1);
++	val = readl_relaxed(ldo + APC_LDO_CFG1);
++	writel_relaxed((val & 0xffff00ff) | (0xf8 << 8), ldo + APC_LDO_CFG1);
++	val = readl_relaxed(ldo + APC_LDO_CFG2);
++	writel_relaxed((val & 0xffffff00) | 0x60, ldo + APC_LDO_CFG2);
++	val = readl_relaxed(ldo + APC_LDO_CFG2);
++	writel_relaxed((val & 0xff00ffff) | (0x4a << 16), ldo + APC_LDO_CFG2);
++	val = readl_relaxed(ldo + APC_LDO_VREF_CFG);
++	writel_relaxed(val & ~BIT(16), ldo + APC_LDO_VREF_CFG);
++	val = readl_relaxed(ldo + APC_LDO_VREF_CFG);
++	writel_relaxed((val & 0xffff80ff) | (LDO_VREF_RET << 8), ldo + APC_LDO_VREF_CFG);
++	writel_relaxed(0x0, ldo);
++	writel_relaxed(0x1, ldo);
++	mb();
++	udelay(1);
++	writel_relaxed(0x0, ldo);
++	mb();
++	iounmap(ldo);
++}
++
++static int msm8994_unclamp_cpu(unsigned int cpu)
++{
++	void __iomem *acc = ioremap(ACC_BASE(cpu), SZ_4K);
++	unsigned int val;
++	int ret;
++
++	if (!acc)
++		return -ENOMEM;
++	/* The power-up sequence of msm8994_unclamp_secondary_arm_cpu() */
++	writel_relaxed(0x00000001, acc + CPU_PWR_GATE_CTL);	/* head switch, few */
++	mb();
++	udelay(1);
++	writel_relaxed(0x00000003, acc + CPU_PWR_GATE_CTL);	/* head switch, rest */
++	mb();
++	udelay(1);
++	writel_relaxed(0x00000079, acc + CPU_PWR_CTL);		/* coremem clamp off */
++	mb();
++	udelay(2);
++	writel_relaxed(0x0000007d, acc + CPU_PWR_CTL);		/* coremem gdhs */
++	mb();
++	udelay(2);
++	writel_relaxed(0x0000003d, acc + CPU_PWR_CTL);		/* clamp off */
++	mb();
++	writel_relaxed(0x0000003c, acc + CPU_PWR_CTL);
++	mb();
++	udelay(1);
++	writel_relaxed(0x0000000c, acc + CPU_PWR_CTL);		/* reset off */
++	mb();
++	writel_relaxed(0x0000008c, acc + CPU_PWR_CTL);		/* PWRDUP */
++	mb();
++	iounmap(acc);
++
++	ret = qcom_scm_io_readl(L2_PWR_SEC_REG, &val);
++	if (ret)
++		return ret;
++	return qcom_scm_io_writel(L2_PWR_SEC_REG, val & ~BIT(0));
++}
++
++static int __init msm8994_cpu_boot_init(void)
++{
++	struct device_node *np;
++	struct resource res;
++	void __iomem *page;
++	unsigned int cpu;
++	int ret;
++
++	if (!of_machine_is_compatible("qcom,msm8994"))
++		return -ENODEV;
++	if (!qcom_scm_is_available())
++		return -EPROBE_DEFER;
++	if (cpus & ~0x0eU) {
++		pr_err("msm8994-cpu-boot: only CPU1-3 (A53 cluster) are supported\n");
++		return -EINVAL;
++	}
++
++	np = of_find_node_by_path("/reserved-memory");
++	np = np ? of_get_child_by_name(np, "spin-table") : NULL;
++	if (!np)
++		return -ENODEV;
++	ret = of_address_to_resource(np, 0, &res);
++	of_node_put(np);
++	if (ret)
++		return ret;
++
++	/* The release address the kernel already wrote (holding pen) stays */
++	page = ioremap(res.start, RELEASE_OFFSET);
++	if (!page)
++		return -ENOMEM;
++	memcpy_toio(page, spin_code, sizeof(spin_code));
++	mb();
++	iounmap(page);
++
++	ret = qcom_scm_set_boot_addr_mc_phys(res.start, SCM_BOOT_MC_FLAGS);
++	if (ret) {
++		pr_err("msm8994-cpu-boot: setting the boot address failed: %d\n", ret);
++		return ret;
++	}
++
++	msm8994_ldo_config(0);
++	for (cpu = 1; cpu < 4; cpu++) {
++		if (!(cpus & BIT(cpu)))
++			continue;
++		ret = msm8994_unclamp_cpu(cpu);
++		if (ret) {
++			pr_err("msm8994-cpu-boot: CPU%u power-up failed: %d\n", cpu, ret);
++			continue;
++		}
++		msm8994_ldo_config(cpu);
++		pr_info("msm8994-cpu-boot: CPU%u powered up; it waits in the holding pen\n", cpu);
++	}
++	return 0;
++}
++module_init(msm8994_cpu_boot_init);
++
++MODULE_DESCRIPTION("MSM8994 secondary CPU power-up for the spin-table enable method");
++MODULE_LICENSE("GPL");
+diff --git a/include/linux/firmware/qcom/qcom_scm.h b/include/linux/firmware/qcom/qcom_scm.h
+index 5747bd191..f70a80c8c 100644
+--- a/include/linux/firmware/qcom/qcom_scm.h
++++ b/include/linux/firmware/qcom/qcom_scm.h
+@@ -62,6 +62,7 @@ enum qcom_scm_ice_cipher {
+ bool qcom_scm_is_available(void);
+ 
+ int qcom_scm_set_cold_boot_addr(void *entry);
++int qcom_scm_set_boot_addr_mc_phys(phys_addr_t addr, unsigned int flags);
+ int qcom_scm_set_warm_boot_addr(void *entry);
+ void qcom_scm_cpu_power_down(u32 flags);
+ int qcom_scm_set_remote_state(u32 state, u32 id);
+-- 
+2.56.0
+

@@ -1,7 +1,7 @@
 From e133ae00491bb6cc6cf5cef56bf62201d14dcd10 Mon Sep 17 00:00:00 2001
 From: Yassine Oudjana <y.oudjana@protonmail.com>
 Date: Thu, 15 Jul 2021 09:14:47 +0400
-Subject: [PATCH 06/11] power: supply: Add driver for Qualcomm SMBCHG
+Subject: [PATCH 06/12] power: supply: Add driver for Qualcomm SMBCHG
 
 Add a driver for the switch-mode battery charger found on
 PMICs such as PMI8994. This block is referred to in the vendor
