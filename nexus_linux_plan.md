@@ -332,3 +332,17 @@ handheld. Telephony needs separate evidence before calling it a phone.
   its log on the panel by webcam; (4) then SMP with ramoops read back through
   `fastboot oem ramoops raw`.
 
+**N4a runbook (attended; each step a one-shot RAM boot, nothing flashed).**
+Start: the phone in stock fastboot (`device/angler/tools/cycle` gets there
+from Linux; after a hang, hold Power about 20 s, then Volume Down + Power).
+
+| Step | Command | Expect / Pass | Stop | Risk |
+| --- | --- | --- | --- | --- |
+| 1 | `fastboot boot lk2nd.img`, then `fastboot oem log` | lk2nd's log; the board found | no lk2nd fastboot | low |
+| 2 | `fastboot boot angler-nosmp.img` (CPUs `enable-method = "lk2nd,skip-smp"`) | Arch over SSH on CPU0: lk2nd can start our kernel | hang: lk2nd's kernel handoff, not SMP | low |
+| 3 | lk2nd built with `DEBUG_FBCON=1`, then `angler-n1.img` | its log on the panel (webcam) up to the jump | | low |
+| 4 | `angler-n1.img` (spin table) | `nproc` 8 | hang: read `fastboot oem ramoops raw` from lk2nd after the forced restart | moderate |
+
+Rollback for every step is a long Power press; `boot` keeps the known-good
+image, so the phone comes back to Linux with SSH.
+
