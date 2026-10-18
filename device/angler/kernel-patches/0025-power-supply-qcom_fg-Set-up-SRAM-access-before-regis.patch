@@ -1,7 +1,7 @@
-From 6a78a54108c800ad4aff4cf21304b46105efd86e Mon Sep 17 00:00:00 2001
+From 674c456e53662356bdd8ec24f5c3bb62cdc53ecb Mon Sep 17 00:00:00 2001
 From: chris <08a487@gmail.com>
 Date: Sun, 18 Oct 2026 14:34:28 -0600
-Subject: [PATCH 25/28] power: supply: qcom_fg: Set up SRAM access before
+Subject: [PATCH 25/30] power: supply: qcom_fg: Set up SRAM access before
  registering the battery
 
 Registering the battery supply also registers its thermal zone, and

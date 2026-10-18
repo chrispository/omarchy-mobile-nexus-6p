@@ -1,0 +1,81 @@
+From 57deb22674989163a54964e0867939d5e880a3bf Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 15:37:46 -0600
+Subject: [PATCH 30/30] iommu/qcom: Keep the SMMU powered while the secure page
+ table is set up
+
+qcom_iommu_sec_ptbl_init() ran from probe before runtime PM was
+enabled, with the SMMU's clocks off and its power domain down. Power
+it up around the call, as the vendor kernel has its regulators and
+clocks on whenever it programs secure state, in case the secure world
+accesses the SMMU meanwhile.
+
+Until the table exists the secure world refuses to restore the SMMU's
+configuration, so resume skips that call until the table is set up.
+
+Assisted-by: Claude Opus 5.5
+---
+ drivers/iommu/arm/arm-smmu/qcom_iommu.c | 26 ++++++++++++++++++-------
+ 1 file changed, 19 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+index f500b122f..ed3a6a195 100644
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -55,6 +55,7 @@ struct qcom_iommu_dev {
+ 	void __iomem		*local_base;
+ 	u32			 sec_id;
+ 	u8			 max_asid;
++	bool			 sec_cfg_ready;
+ 	struct qcom_iommu_ctx	*ctxs[];   /* indexed by asid */
+ };
+ 
+@@ -873,19 +874,30 @@ static int qcom_iommu_device_probe(struct platform_device *pdev)
+ 		return -ENODEV;
+ 	}
+ 
++	platform_set_drvdata(pdev, qcom_iommu);
++
++	ret = devm_pm_runtime_enable(dev);
++	if (ret)
++		return ret;
++
++	/*
++	 * The secure world may touch the SMMU while it sets up the secure
++	 * page table, so keep it powered and clocked meanwhile. Until the
++	 * table exists the secure world refuses to restore the SMMU's
++	 * configuration, so resume skips that until then.
++	 */
+ 	if (qcom_iommu_has_secure_context(qcom_iommu)) {
++		ret = pm_runtime_resume_and_get(dev);
++		if (ret)
++			return ret;
+ 		ret = qcom_iommu_sec_ptbl_init(dev);
++		pm_runtime_put_sync(dev);
+ 		if (ret) {
+ 			dev_err(dev, "cannot init secure pg table(%d)\n", ret);
+ 			return ret;
+ 		}
+ 	}
+-
+-	platform_set_drvdata(pdev, qcom_iommu);
+-
+-	ret = devm_pm_runtime_enable(dev);
+-	if (ret)
+-		return ret;
++	qcom_iommu->sec_cfg_ready = true;
+ 
+ 	/* register context bank devices, which are child nodes: */
+ 	ret = devm_of_platform_populate(dev);
+@@ -943,7 +955,7 @@ static int __maybe_unused qcom_iommu_resume(struct device *dev)
+ 	if (ret < 0)
+ 		return ret;
+ 
+-	if (dev->pm_domain) {
++	if (dev->pm_domain && qcom_iommu->sec_cfg_ready) {
+ 		ret = qcom_scm_restore_sec_cfg(qcom_iommu->sec_id, 0);
+ 		if (ret)
+ 			clk_bulk_disable_unprepare(CLK_NUM, qcom_iommu->clks);
+-- 
+2.56.0
+

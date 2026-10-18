@@ -1,0 +1,80 @@
+From cd0842ac02eba94be07103ee91e34c82b2177157 Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 15:34:01 -0600
+Subject: [PATCH 29/30] iommu/qcom: Take the secure page table from a reserved
+ region
+
+The secure world takes the secure page table away from the
+non-secure side. The table came from dma_alloc_attrs() with
+DMA_ATTR_NO_KERNEL_MAPPING, which still leaves it in the kernel's
+linear map, where a speculative access can reach it. The vendor
+kernel's arm64 DMA code removes such allocations from the linear
+map; mainline doesn't.
+
+Use the node's memory-region, a reserved no-map region, when there is
+one.
+
+Assisted-by: Claude Opus 5.5
+---
+ drivers/iommu/arm/arm-smmu/qcom_iommu.c | 31 +++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+index 0c00c8c67..f500b122f 100644
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -23,6 +23,7 @@
+ #include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/of_platform.h>
++#include <linux/of_reserved_mem.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm.h>
+ #include <linux/pm_runtime.h>
+@@ -617,6 +618,7 @@ static int qcom_iommu_sec_ptbl_init(struct device *dev)
+ 	void *cpu_addr;
+ 	dma_addr_t paddr;
+ 	unsigned long attrs;
++	struct device_node *rmem_np;
+ 	static bool allocated = false;
+ 	int ret;
+ 
+@@ -641,6 +643,35 @@ static int qcom_iommu_sec_ptbl_init(struct device *dev)
+ 
+ 	dev_info(dev, "iommu sec: pgtable size: %zu\n", psize);
+ 
++	/*
++	 * The secure world takes the table away from the non-secure side.
++	 * Memory the kernel still maps, as DMA_ATTR_NO_KERNEL_MAPPING leaves
++	 * it, can then be touched by a speculative access, which the secure
++	 * world punishes with a reset (MSM8994). A reserved no-map region
++	 * avoids that; the vendor kernel unmapped its allocation instead.
++	 */
++	rmem_np = of_parse_phandle(dev->of_node, "memory-region", 0);
++	if (rmem_np) {
++		struct reserved_mem *rmem = of_reserved_mem_lookup(rmem_np);
++
++		of_node_put(rmem_np);
++		if (!rmem || rmem->size < psize) {
++			dev_err(dev, "memory-region too small for the pgtable\n");
++			return -EINVAL;
++		}
++
++		paddr = rmem->base;
++		dev_info(dev, "iommu sec: pgtable at %pad (reserved)\n", &paddr);
++		ret = qcom_scm_iommu_secure_ptbl_init(paddr, psize, spare);
++		if (ret) {
++			dev_err(dev, "failed to init iommu pgtable (%d)\n", ret);
++			return ret;
++		}
++
++		allocated = true;
++		return 0;
++	}
++
+ 	attrs = DMA_ATTR_NO_KERNEL_MAPPING;
+ 
+ 	cpu_addr = dma_alloc_attrs(dev, psize, &paddr, GFP_KERNEL, attrs);
+-- 
+2.56.0
+

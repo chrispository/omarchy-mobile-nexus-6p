@@ -1,7 +1,7 @@
-From 9096020962b3f48b209fa0723c0c2e714cb6e30e Mon Sep 17 00:00:00 2001
+From ec7aefa40b69d3d2a9338f88bc64c832ed33be25 Mon Sep 17 00:00:00 2001
 From: chris <08a487@gmail.com>
 Date: Sun, 18 Oct 2026 15:26:01 -0600
-Subject: [PATCH 28/28] iommu/qcom: Size the content protection pool before the
+Subject: [PATCH 28/30] iommu/qcom: Size the content protection pool before the
  secure page table
 
 The vendor kernel's msm_iommu_sec_ptbl_init() sets the content

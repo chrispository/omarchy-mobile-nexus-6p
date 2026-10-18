@@ -10,8 +10,24 @@ serial=${ANGLER_SERIAL:-$(cat ~/android/reference/angler/serial 2>/dev/null)}
 [[ -n $serial ]] || { echo "no angler serial: set ANGLER_SERIAL or ~/android/reference/angler/serial"; exit 1; }
 S="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=2 root@172.16.42.1"
 in_fastboot() { fastboot devices | awk '{print $1}' | grep -qxF "$serial"; }
+# Fast restart into fastboot: the restart reason reboot-to would write, then
+# sync, remount read-only and an immediate warm restart (SysRq u, b). A full
+# systemd shutdown hung after its final SIGTERM on both kernels
+# (GPU-PLAN.md), and a test cycle doesn't need one. REBOOT=clean uses
+# reboot-to's systemctl path instead.
+fast='python3 -c "
+import mmap, os, struct
+fd = os.open(\"/dev/mem\", os.O_RDWR | os.O_SYNC)
+m = mmap.mmap(fd, 0x1000, offset=0xfe87f000)
+m[0x65c:0x660] = struct.pack(\"<I\", 0x77665500)
+assert m[0x65c:0x660] == struct.pack(\"<I\", 0x77665500)
+" && sync && echo u > /proc/sysrq-trigger && sleep 1 && echo b > /proc/sysrq-trigger'
 if ! in_fastboot; then
-  $S 'nohup sh -c "sleep 1; reboot-to bootloader" >/dev/null 2>&1 </dev/null &' || { echo "no ssh"; exit 1; }
+  if [[ ${REBOOT:-fast} == clean ]]; then
+    $S 'nohup sh -c "sleep 1; reboot-to bootloader" >/dev/null 2>&1 </dev/null &' || { echo "no ssh"; exit 1; }
+  else
+    $S "nohup sh -c '$fast' >/dev/null 2>&1 </dev/null &" || { echo "no ssh"; exit 1; }
+  fi
   for i in $(seq 1 60); do sleep 2; in_fastboot && break; done
 fi
 in_fastboot || { echo "angler not in fastboot"; exit 1; }

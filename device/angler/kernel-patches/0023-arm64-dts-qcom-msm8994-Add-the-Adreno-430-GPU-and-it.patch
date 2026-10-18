@@ -1,7 +1,7 @@
-From c98187790821349cb105e5ed57444c76f953e03f Mon Sep 17 00:00:00 2001
+From 06b39ec5a100621bc5c7308c4c42ea505beb1a7e Mon Sep 17 00:00:00 2001
 From: chris <08a487@gmail.com>
 Date: Sun, 18 Oct 2026 13:44:06 -0600
-Subject: [PATCH 23/28] arm64: dts: qcom: msm8994: Add the Adreno 430 GPU and
+Subject: [PATCH 23/30] arm64: dts: qcom: msm8994: Add the Adreno 430 GPU and
  its IOMMU
 
 Describe the Adreno 430 and the SMMU in front of it, both disabled
@@ -19,14 +19,27 @@ into the SMMU, so the user context bank there gets ASID 0.
 
 Assisted-by: Claude Opus 5.5
 ---
- arch/arm64/boot/dts/qcom/msm8994.dtsi | 87 +++++++++++++++++++++++++++
- 1 file changed, 87 insertions(+)
+ arch/arm64/boot/dts/qcom/msm8994.dtsi | 94 +++++++++++++++++++++++++++
+ 1 file changed, 94 insertions(+)
 
 diff --git a/arch/arm64/boot/dts/qcom/msm8994.dtsi b/arch/arm64/boot/dts/qcom/msm8994.dtsi
-index b5cbdd620..c2977e672 100644
+index b5cbdd620..6df9a1198 100644
 --- a/arch/arm64/boot/dts/qcom/msm8994.dtsi
 +++ b/arch/arm64/boot/dts/qcom/msm8994.dtsi
-@@ -1081,6 +1081,93 @@ mmcc: clock-controller@fd8c0000 {
+@@ -258,6 +258,12 @@ peripheral_region: memory@ca00000 {
+ 			no-map;
+ 		};
+ 
++		/* The secure world's IOMMU page tables, never mapped by Linux */
++		iommu_sec_mem: memory@e900000 {
++			reg = <0 0x0e900000 0 0x40000>;
++			no-map;
++		};
++
+ 		rmtfs_mem: memory@c6400000 {
+ 			compatible = "qcom,rmtfs-mem";
+ 			reg = <0 0xc6400000 0 0x180000>;
+@@ -1081,6 +1087,94 @@ mmcc: clock-controller@fd8c0000 {
  					       <600000000>;
  		};
  
@@ -88,6 +101,7 @@ index b5cbdd620..c2977e672 100644
 +			#size-cells = <1>;
 +			#iommu-cells = <1>;
 +			qcom,iommu-secure-id = <18>;
++			memory-region = <&iommu_sec_mem>;
 +
 +			status = "disabled";
 +

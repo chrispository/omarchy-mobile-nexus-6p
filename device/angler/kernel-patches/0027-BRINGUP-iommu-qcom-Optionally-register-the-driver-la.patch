@@ -1,7 +1,7 @@
-From 8e29428a0546fe37e4ec72929e4a5d0e11dc7a52 Mon Sep 17 00:00:00 2001
+From 0ec336012a5ea21d3afe36de2b8f51fab9ba4621 Mon Sep 17 00:00:00 2001
 From: chris <08a487@gmail.com>
 Date: Sun, 18 Oct 2026 15:21:42 -0600
-Subject: [PATCH 27/28] BRINGUP: iommu/qcom: Optionally register the driver
+Subject: [PATCH 27/30] BRINGUP: iommu/qcom: Optionally register the driver
  late
 
 Not for upstream. On MSM8994 the GPU SMMU's probe crashed the phone
