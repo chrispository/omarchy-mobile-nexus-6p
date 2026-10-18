@@ -19,6 +19,7 @@ while IFS= read -r -d '' file; do
 done < <(find vendor -type l -print0)
 install -Dm644 etc/10-omamobile-angler-ssh.conf "$destination/etc/ssh/sshd_config.d/10-omamobile-angler.conf"
 install -Dm644 etc/omamobile-proxy.sh "$destination/etc/profile.d/omamobile-proxy.sh"
+install -Dm644 etc/50-omamobile-angler.conf "$destination/etc/UPower/UPower.conf.d/50-omamobile-angler.conf"
 install -Dm644 etc/omamobile-mirrorlist "$destination/etc/pacman.d/omamobile-mirrorlist"
 install -Dm644 LICENSE "$destination/usr/share/licenses/omamobile-device-angler/LICENSE"
 install -Dm644 version "$destination/usr/share/omamobile/device-angler/version"

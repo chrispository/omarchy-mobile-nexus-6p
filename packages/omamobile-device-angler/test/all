@@ -32,7 +32,8 @@ for f in usr/bin/reboot-to usr/bin/fbkick usr/bin/omamobile-boot-ok \
          usr/bin/omamobile-watchdog usr/lib/systemd/system/sysinit.target.wants/omamobile-watchdog.service \
          usr/lib/systemd/network/20-usb-gadget.network \
          usr/lib/NetworkManager/conf.d/10-omamobile-usb.conf \
-         etc/ssh/sshd_config.d/10-omamobile-angler.conf; do
+         etc/ssh/sshd_config.d/10-omamobile-angler.conf \
+         etc/UPower/UPower.conf.d/50-omamobile-angler.conf; do
   [[ -e $tmp/dest/$f ]] || fail "installs $f"
 done
 pass "install layout"
@@ -43,3 +44,7 @@ pass "display clocks blacklisted"
 
 grep -c 'input_current_limit}="500000"' vendor/udev/rules.d/60-omamobile-charger.rules >/dev/null || fail "charger input limit rule"
 pass "charger input limit"
+
+# Suspend drops USB on angler, so a critical battery must power off instead
+grep -qx 'CriticalPowerAction=PowerOff' etc/50-omamobile-angler.conf || fail "upower powers off at critical"
+pass "upower critical action"

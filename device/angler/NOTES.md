@@ -58,6 +58,11 @@ angler-03.78), with the reason for each. Plan and results:
 
 ## Power
 
+- **Suspend (s2idle) takes USB down and nothing brings it back,** so the
+  phone looks hung: dark screen, no gadget. Only a Power press wakes it.
+  upower suspended it at a 2% fuel-gauge reading, and device-angler 0.1.7
+  makes upower power off instead. Before calling something a hang, check
+  `journalctl -b -1` for `PM: suspend entry`.
 - **The charger starts at a 100 mA input limit** on a USB data port, and the
   gadget used to ask the host for 2 mA: the phone drained while plugged in.
   Ask for 500 mA (`MaxPower`) and set `qcom-smbchg-usb/input_current_limit`.

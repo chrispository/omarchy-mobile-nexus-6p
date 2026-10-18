@@ -461,3 +461,27 @@ image, so the phone comes back to Linux with SSH.
   orange while charging, green when full. The subnodes are listed red
   first, because that trigger gives its intensities in red, green, blue
   order (blue first made "orange" cyan).
+
+### 2026-10-18 (midday): the "SDDM hang" was a suspend (7.3.0-rc7-angler+)
+
+- **Not a hang.** The journal of that boot shows `upowerd` asking for
+  suspend at 08:48:16 (`suspend requested from client ... upowerd`), and
+  `PM: suspend entry (s2idle)` at 08:48:29, the second USB dropped. The
+  fuel gauge read 1-2% then (it reads 29% at 3.82 V now), the session's load
+  made the battery discharge for a moment, and upower's
+  `PercentageAction=2` with `CriticalPowerAction=Auto` suspended the phone.
+  The Power press at 12:38 woke it, and the user's 20 s hold then restarted
+  it. The same journal runs straight through to 12:38.
+- **Suspend isn't usable yet:** the gadget goes away and nothing brings it
+  back, and entry warns `gcc_usb30_master_clk status stuck at 'on'` (dwc3
+  `HS-PHY not in L2`). device-angler **0.1.7** sets upower's critical
+  action to `PowerOff`; `GetCriticalAction` returns `PowerOff` on the phone.
+- **0.1.6's watchdog feeder is installed** and active (`sysinit.target`).
+- **`boot` now holds `angler-n1.img`** (sha256 `c1d25c96…`, approved by the
+  owner): a reset or brownout lands in Arch with the charger driver, four
+  cores and the LED. `angler-known-good.img` (RAM root) stays on the laptop
+  as the rollback (`fastboot flash boot`). First boot from it: SSH 51 s after
+  `fastboot reboot`, `nproc` 4, charging at 134 mA at 3.82 V.
+- pstore was empty after the forced restart (no ramoops region yet).
+- SDDM stays disabled until the owner wants the session back; the "hang"
+  that disabled it is explained.
