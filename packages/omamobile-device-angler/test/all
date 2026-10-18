@@ -25,6 +25,13 @@ grep -c 'KERNEL!="\*rpmb\*"' "$rules" >/dev/null || fail "guard skips RPMB"
 grep -c 'DEVTYPE}=="partition"' "$rules" >/dev/null || fail "guard is per partition"
 pass "storage guard rules"
 
+# The kernels aren't packaged: kernel-modules-hook must not clean up their
+# modules, and the condition must name a file this package installs
+dropin=vendor/systemd/system/linux-modules-cleanup.service.d/50-omamobile-angler.conf
+grep -qx 'ConditionPathExists=!/usr/share/omamobile/device-angler/version' "$dropin" || fail "module cleanup off"
+grep -c 'usr/share/omamobile/device-angler/version' install >/dev/null || fail "module cleanup condition file installed"
+pass "kernel-modules-hook leaves unpackaged kernels alone"
+
 ./install "$tmp/dest" "$tmp/build"
 for f in usr/bin/reboot-to usr/bin/fbkick usr/bin/omamobile-boot-ok \
          usr/lib/systemd/system/omamobile-boot-ok.service \
