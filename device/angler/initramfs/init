@@ -1,0 +1,111 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Omarchy Mobile on the Nexus 6P (angler): N1 RAM-root init.
+# USB networking and ssh only, nothing persistent (nexus_linux_plan.md N1).
+# Host side: the phone appears as a USB network adapter; ssh root@172.16.42.1
+
+export PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts && mount -t devpts devpts /dev/pts
+mount -t configfs configfs /sys/kernel/config
+mount -t tmpfs tmpfs /run
+
+say() { echo "omamobile: $*" > /dev/kmsg; }
+
+# --- eMMC safety: every mmcblk device is read-only, and nothing is mounted ---
+# The N1 kernel has no eMMC driver, so there should be nothing to guard. This
+# is the second line of defence for when the driver is enabled: every eMMC
+# disk, partition and boot area is set read-only as soon as it appears, and
+# the whole-disk node is removed. RPMB is left alone (never opened). Nothing
+# in this initramfs runs mdev or udev, so nothing else touches the disks.
+mkdir -p /run/emmc-ro
+emmc_ro_pass() {
+  local s name
+  for s in /sys/block/mmcblk* /sys/block/mmcblk*/mmcblk*; do
+    [ -r "$s/ro" ] || continue
+    name=${s##*/}
+    case $name in *rpmb*) continue ;; esac
+    [ -e "/run/emmc-ro/$name" ] && continue
+    [ -b "/dev/$name" ] || continue
+    if blockdev --setro "/dev/$name" && [ "$(cat "$s/ro")" = 1 ]; then
+      : > "/run/emmc-ro/$name"
+      say "emmc-ro: /dev/$name read-only"
+    else
+      say "emmc-ro: FAILED to make /dev/$name read-only"
+    fi
+  done
+  for s in /dev/mmcblk[0-9]; do
+    [ -b "$s" ] && [ -e "/run/emmc-ro/${s##*/}" ] && rm -f "$s"
+  done
+}
+emmc_ro_pass
+( while :; do emmc_ro_pass; sleep 1; done ) &
+
+say "N1 on $(cat /proc/sys/kernel/osrelease), cpus online $(cat /sys/devices/system/cpu/online)"
+
+# USB gadget: CDC NCM network + ACM serial console
+g=/sys/kernel/config/usb_gadget/g1
+mkdir -p $g/strings/0x409 $g/configs/c.1/strings/0x409
+echo 0x1d6b > $g/idVendor          # Linux Foundation
+echo 0x0104 > $g/idProduct         # Multifunction composite gadget
+echo "Omarchy Mobile" > $g/strings/0x409/manufacturer
+echo "Nexus 6P (N1)" > $g/strings/0x409/product
+echo "omamobile" > $g/strings/0x409/serialnumber
+echo "NCM + ACM" > $g/configs/c.1/strings/0x409/configuration
+mkdir -p $g/functions/ncm.usb0 $g/functions/acm.GS0
+ln -s $g/functions/ncm.usb0 $g/configs/c.1/
+ln -s $g/functions/acm.GS0 $g/configs/c.1/
+
+udc=""
+for i in $(seq 1 30); do
+  udc=$(ls /sys/class/udc 2>/dev/null | head -1)
+  [ -n "$udc" ] && break
+  sleep 1
+done
+if [ -n "$udc" ]; then
+  echo "$udc" > $g/UDC && say "USB gadget up on $udc"
+else
+  say "no USB device controller found"
+fi
+
+# Network: phone is 172.16.42.1, host gets 172.16.42.2 from udhcpd
+ip link set lo up
+for i in $(seq 1 10); do ip link show usb0 >/dev/null 2>&1 && break; sleep 1; done
+ip addr add 172.16.42.1/24 dev usb0 && ip link set usb0 up
+cat > /run/udhcpd.conf <<CONF
+start 172.16.42.2
+end 172.16.42.2
+interface usb0
+max_leases 1
+lease_file /run/udhcpd.leases
+CONF
+touch /run/udhcpd.leases
+udhcpd /run/udhcpd.conf
+
+mkdir -p /etc/dropbear
+dropbear -R -E -p 22 2>/dev/null && say "ssh: root@172.16.42.1"
+
+# A shell on the ACM serial port as a second way in
+( while :; do setsid sh -c 'exec sh </dev/ttyGS0 >/dev/ttyGS0 2>&1'; sleep 1; done ) &
+
+say "ready"
+
+# Self-recovery: if no host configures the USB gadget within 45 s, panic.
+# panic=10 reboots, and since fastboot boot is one-shot the phone comes back
+# up in stock Android from its boot partition.
+(
+  for i in $(seq 1 45); do
+    grep -qx configured /sys/class/udc/*/state 2>/dev/null && exit 0
+    sleep 1
+  done
+  say "USB never configured; crashing so the phone reboots to stock"
+  dmesg | grep -iE 'dwc3|phy|usb|udc|clk|error|fail' | tail -20 > /dev/kmsg
+  sleep 2
+  echo c > /proc/sysrq-trigger
+) &
+
+# PID 1 must never exit
+while :; do sleep 3600; done

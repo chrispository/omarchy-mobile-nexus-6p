@@ -1,0 +1,100 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Build the Nexus 6P (angler) N1 RAM-root boot image (nexus_linux_plan.md N1):
+# mainline kernel + device/angler/kernel.config, the angler DTB retagged for
+# this handset's board ID, and an Alpine initramfs with dropbear and our init.
+# Nothing here touches the phone; boot the result with `fastboot boot`.
+#
+#   KERNEL_DIR  mainline tree       (default ~/android/mainline/linux-angler)
+#   KERNEL_OUT  build output        (default ~/android/mainline/out-angler-boot)
+#   BOARD_ID    qcom,board-id       (default 0x1f57, ANGLER-VN2; fastboot getvar
+#                                    hardware-revision tells which board a phone is)
+#   CMDLINE     kernel command line
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+DEV="$ROOT/device/angler"
+WORK="${WORK:-$HOME/android}"
+KERNEL_DIR="${KERNEL_DIR:-$WORK/mainline/linux-angler}"
+KERNEL_OUT="${KERNEL_OUT:-$WORK/mainline/out-angler-boot}"
+BOARD_ID="${BOARD_ID:-0x1f57}"
+CMDLINE="${CMDLINE:-maxcpus=4 panic=10 clk_ignore_unused pd_ignore_unused loglevel=7 rdinit=/init}"
+IMAGE=angler-build:24.04
+DTB=qcom/msm8994-huawei-angler-rev-101.dtb
+# The bootloader unpacks the kernel at 0x8000 and puts the DTB at 0x01e00000:
+# the kernel's in-memory size (Image header image_size, BSS included) must end
+# below it, or the kernel overwrites its own DTB and hangs on the Google logo.
+DTB_ADDR=0x01e00000
+
+say() { printf '\e[1m==> %s\e[0m\n' "$*"; }
+die() { printf '\e[31merror:\e[0m %s\n' "$*" >&2; exit 1; }
+
+[[ -d $KERNEL_DIR ]] || die "no kernel tree at $KERNEL_DIR"
+command -v mkbootimg >/dev/null || die "mkbootimg not found (Arch: android-tools)"
+mkdir -p "$KERNEL_OUT"
+
+say "Build environment $IMAGE"
+docker build -q -t "$IMAGE" "$DEV/docker" >/dev/null
+
+in_container() {
+  docker run --rm -v "$WORK:$WORK" -v "$ROOT:$ROOT" -w "$KERNEL_DIR" "$IMAGE" bash -c "$1"
+}
+
+say "Kernel: $KERNEL_DIR -> $KERNEL_OUT"
+in_container "
+  set -e
+  make ARCH=arm64 LLVM=1 O=$KERNEL_OUT defconfig >/dev/null
+  scripts/kconfig/merge_config.sh -m -O $KERNEL_OUT $KERNEL_OUT/.config $DEV/kernel.config >/dev/null
+  make ARCH=arm64 LLVM=1 O=$KERNEL_OUT olddefconfig >/dev/null
+  make ARCH=arm64 LLVM=1 O=$KERNEL_OUT -j\$(nproc) Image.gz $DTB
+  cp $KERNEL_OUT/arch/arm64/boot/dts/$DTB $KERNEL_OUT/angler.dtb
+  fdtput -t i $KERNEL_OUT/angler.dtb / qcom,board-id $BOARD_ID 0
+"
+# The fragment must have survived olddefconfig (a missing dependency drops a
+# symbol silently)
+while IFS= read -r line; do
+  [[ $line =~ ^CONFIG_([A-Z0-9_]+)=(.*)$ ]] || continue
+  sym=${BASH_REMATCH[1]} want=${BASH_REMATCH[2]}
+  if [[ $want == n ]]; then
+    grep -qx "CONFIG_$sym=[ym]" "$KERNEL_OUT/.config" && die "CONFIG_$sym is set, the fragment wants it off"
+  else
+    grep -qxF "CONFIG_$sym=$want" "$KERNEL_OUT/.config" || die "CONFIG_$sym is not $want in the built config"
+  fi
+done < "$DEV/kernel.config"
+
+size=$(od -An -t u8 -j 16 -N 8 "$KERNEL_OUT/arch/arm64/boot/Image" | tr -d ' ')
+end=$((0x8000 + size))
+(( end < DTB_ADDR )) || die "kernel ends at $(printf 0x%x $end), over the DTB at $DTB_ADDR: trim kernel.config"
+say "Kernel image_size $((size / 1048576)) MiB, ends at $(printf 0x%x $end) (DTB at $DTB_ADDR)"
+
+say "Initramfs"
+dl="$WORK/downloads/alpine" ver=3.24.2 stage="$KERNEL_OUT/initramfs"
+tarball="alpine-minirootfs-$ver-aarch64.tar.gz"
+sum=9bf70a7f18ea44094cbb5f70c58f9af129c8214745743db0e68e5502cc2ce773
+mkdir -p "$dl"
+[[ -f $dl/$tarball ]] || curl -fsSL -o "$dl/$tarball" "https://dl-cdn.alpinelinux.org/alpine/v${ver%.*}/releases/aarch64/$tarball"
+echo "$sum  $dl/$tarball" | sha256sum -c --quiet || die "checksum mismatch for $tarball"
+rm -rf "$stage" && mkdir -p "$stage"
+tar -xzf "$dl/$tarball" -C "$stage"
+# busybox-extras: udhcpd, which Alpine's busybox leaves out
+for apk in $(python3 -I "$ROOT/tools/alpine-fetch.py" "$ver" "$dl/apks" dropbear busybox-extras); do
+  tar -xzf "$apk" -C "$stage" --exclude='.PKGINFO' --exclude='.SIGN.*' --exclude='.*.sh' 2>/dev/null || true
+done
+[[ -e $stage/usr/sbin/udhcpd ]] || ln -s /bin/busybox-extras "$stage/usr/sbin/udhcpd"
+[[ -x $stage/usr/sbin/dropbear ]] || die "the initramfs has no dropbear"
+install -m 755 "$DEV/initramfs/init" "$stage/init"
+mkdir -p "$stage/root/.ssh"
+cat "$HOME"/.ssh/*.pub > "$stage/root/.ssh/authorized_keys"
+chmod 700 "$stage/root/.ssh" && chmod 600 "$stage/root/.ssh/authorized_keys"
+(cd "$stage" && find . | cpio -o -H newc --owner=0:0 --quiet) | gzip -9 > "$KERNEL_OUT/initramfs.cpio.gz"
+
+say "Boot image"
+cat "$KERNEL_OUT/arch/arm64/boot/Image.gz" "$KERNEL_OUT/angler.dtb" > "$KERNEL_OUT/Image.gz-dtb"
+# Header v0 with the stock layout (read from a stock-compatible angler image)
+mkbootimg --header_version 0 --kernel "$KERNEL_OUT/Image.gz-dtb" \
+  --ramdisk "$KERNEL_OUT/initramfs.cpio.gz" --pagesize 4096 --base 0x00000000 \
+  --kernel_offset 0x00008000 --ramdisk_offset 0x02000000 --tags_offset "$DTB_ADDR" \
+  --cmdline "$CMDLINE" -o "$KERNEL_OUT/angler-n1.img"
+python3 -I "$DEV/tools/dtb-ids.py" "$KERNEL_OUT/Image.gz-dtb"
+say "$(cat "$KERNEL_OUT/include/config/kernel.release"): $KERNEL_OUT/angler-n1.img"
+sha256sum "$KERNEL_OUT/angler-n1.img"
