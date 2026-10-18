@@ -79,6 +79,11 @@ in_container "
   fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/ramoops@4000000 record-size 0x20000
   fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/ramoops@4000000 console-size 0x80000
   fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/ramoops@4000000 pmsg-size 0
+  # SMP through lk2nd: it boots the other seven cores with a spin table in a
+  # spin-table@ reserved page, since the stock TZ has no PSCI (N4)
+  fdtput -c $KERNEL_OUT/angler.dtb /reserved-memory/spin-table@62ff000
+  fdtput -t x $KERNEL_OUT/angler.dtb /reserved-memory/spin-table@62ff000 reg 0 0x062ff000 0 0x1000
+  fdtput $KERNEL_OUT/angler.dtb /reserved-memory/spin-table@62ff000 no-map
   aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/memdump $PKG/src/memdump.c
   aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/fbkick $PKG/src/fbkick.c
   aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -o $KERNEL_OUT/peek $PKG/src/peek.c
