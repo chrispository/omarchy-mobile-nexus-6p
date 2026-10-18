@@ -382,3 +382,18 @@ image, so the phone comes back to Linux with SSH.
   random host MAC, so the desktop got no address after a reboot. The gadget
   now has fixed MACs, and the pool has 8 addresses.
 
+### 2026-10-18 (morning): A53 cores power up; reboots at low battery brown out
+
+- **`msm8994-cpu-boot.ko` powers up CPU1-3.** SCM (the firmware uses the
+  SMC32 convention) accepted the spin-table page as their cold-boot address,
+  and the three cores were unclamped with the system still healthy.
+- **They could not be onlined:** arm64 registers a CPU whose enable method
+  can't take it down (spin-table) as not hotpluggable, so `cpuN/online` is
+  read-only. Kernel patch: a CPU left offline at boot (`maxcpus=`) may be
+  onlined later; offlining still fails cleanly. Built; untested.
+- **The next reboot browned out** at about 3.2 V (charging, but a reboot's
+  load spike was too much): red LED, off-mode charging. **Don't reboot this
+  phone below about 3.5 V.** After a brownout it comes back on the image in
+  `boot`, which has no charger driver: flashing the charger-capable image
+  there would make that recovery faster (needs the owner's approval).
+

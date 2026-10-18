@@ -1,7 +1,7 @@
 From d2d24325877293a05c45b79d4ec422854d2962ab Mon Sep 17 00:00:00 2001
 From: chris <08a487@gmail.com>
 Date: Sun, 18 Oct 2026 05:28:10 -0600
-Subject: [PATCH 11/12] arm64: dts: qcom: msm8994-huawei-angler: Enable the
+Subject: [PATCH 11/13] arm64: dts: qcom: msm8994-huawei-angler: Enable the
  charger and fuel gauge
 
 The Nexus 6P charges its 3450 mAh battery through the PMI8994's SMBCHG and

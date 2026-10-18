@@ -38,6 +38,18 @@ angler-03.78), with the reason for each. Plan and results:
   reach its `sysrq c` at once). Stop them before switching; only builtins and
   already-running binaries (fbkick, watchdog) are safe after it.
 
+## Power
+
+- **The charger starts at a 100 mA input limit** on a USB data port, and the
+  gadget used to ask the host for 2 mA: the phone drained while plugged in.
+  Ask for 500 mA (`MaxPower`) and set `qcom-smbchg-usb/input_current_limit`.
+- **Don't reboot below about 3.5 V** (`qcom-battery/voltage_now`, or
+  `vph_pwr` on PM8994 ADC channel 7): a reboot's load spike browned the phone
+  out twice at 2.8 to 3.2 V. It then charges with the LED red and comes back
+  on the image in `boot`.
+- **The bootloader reports no battery values** (`fastboot getvar
+  battery-voltage` is empty).
+
 ## Storage, input, userspace
 
 - **The eMMC is `mmcblk1`** (sdhci-msm, HS400 works). Find partitions by
