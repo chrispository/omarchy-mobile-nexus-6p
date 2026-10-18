@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: chris <08a487@gmail.com>
 Date: Sun, 18 Oct 2026 05:45:24 -0600
-Subject: [PATCH 12/15] soc: qcom: Add MSM8994 secondary CPU power-up for
+Subject: [PATCH 12/20] soc: qcom: Add MSM8994 secondary CPU power-up for
  spin-table
 
 The TZ firmware of the Huawei Nexus 6P (MSM8994) has no PSCI, so only the

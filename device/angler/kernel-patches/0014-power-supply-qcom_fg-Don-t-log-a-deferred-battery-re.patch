@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: chris <08a487@gmail.com>
 Date: Sun, 18 Oct 2026 08:22:41 -0600
-Subject: [PATCH 14/15] power: supply: qcom_fg: Don't log a deferred battery
+Subject: [PATCH 14/20] power: supply: qcom_fg: Don't log a deferred battery
  registration as an error
 
 power_supply_register() can defer while the battery's supplier is not

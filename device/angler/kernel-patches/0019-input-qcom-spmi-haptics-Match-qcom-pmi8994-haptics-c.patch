@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 08:36:43 -0600
+Subject: [PATCH 19/20] input: qcom-spmi-haptics: Match qcom,pmi8994-haptics,
+ cap the drive voltage
+
+Mainline's qcom,spmi-haptics binding describes the newer PMIH0108
+block, so match the PMI8994 block by its own compatible too.
+
+The drive voltage scales with the effect's magnitude up to 3.6 V, about
+twice what the Nexus 6P's stock kernel uses for its LRA (1.2 V, 1.8 V
+for strong effects). Take the voltage at full magnitude from an
+optional qcom,vmax-mv.
+---
+ drivers/input/misc/qcom-spmi-haptics.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/input/misc/qcom-spmi-haptics.c b/drivers/input/misc/qcom-spmi-haptics.c
+index 321bcca47..f31cb6dba 100644
+--- a/drivers/input/misc/qcom-spmi-haptics.c
++++ b/drivers/input/misc/qcom-spmi-haptics.c
+@@ -161,6 +161,7 @@ enum hap_play_control {
+  * @play_mode: The play mode to use (direct, buffer, pwm, audio).
+  * @magnitude: The strength we should be playing at.
+  * @vmax: Max voltage to use when playing.
++ * @vmax_limit: Highest @vmax this actuator takes (at full magnitude).
+  * @current_limit: The current limit for this hardware (400mA or 800mA).
+  * @play_wave_rate: The wave rate to use for this hardware.
+  * @wave_samp: The array of wave samples to write for buffer mode.
+@@ -186,6 +187,7 @@ struct spmi_haptics {
+ 	u8 play_mode;
+ 	int magnitude;
+ 	u32 vmax;
++	u32 vmax_limit;
+ 	u32 current_limit;
+ 	u32 play_wave_rate;
+ 
+@@ -761,7 +763,7 @@ static int spmi_haptics_play_effect(struct input_dev *dev, void *data,
+ 
+ 	atomic_set(&haptics->active, 1);
+ 
+-	haptics->vmax = ((HAP_VMAX_MAX_MV - HAP_VMAX_MIN_MV) * haptics->magnitude) / 100 +
++	haptics->vmax = ((haptics->vmax_limit - HAP_VMAX_MIN_MV) * haptics->magnitude) / 100 +
+ 					HAP_VMAX_MIN_MV;
+ 
+ 	dev_dbg(haptics->dev, "%s: magnitude: %d, vmax: %d", __func__,
+@@ -853,6 +855,10 @@ static int spmi_haptics_probe(struct platform_device *pdev)
+ 		clamp_t(u32, haptics->play_wave_rate,
+ 			HAP_WAVE_PLAY_RATE_MIN_US, HAP_WAVE_PLAY_RATE_MAX_US);
+ 
++	haptics->vmax_limit = HAP_VMAX_MAX_MV;
++	if (!of_property_read_u32(node, "qcom,vmax-mv", &val))
++		haptics->vmax_limit = clamp_t(u32, val, HAP_VMAX_MIN_MV, HAP_VMAX_MAX_MV);
++
+ 	haptics->wave_shape = HAP_WAVE_SINE;
+ 	ret = of_property_read_u32(node, "qcom,wave-shape", &val);
+ 	if (!ret) {
+@@ -957,6 +963,7 @@ static void spmi_haptics_shutdown(struct platform_device *pdev)
+ }
+ 
+ static const struct of_device_id spmi_haptics_match_table[] = {
++	{ .compatible = "qcom,pmi8994-haptics" },
+ 	{ .compatible = "qcom,spmi-haptics" },
+ 	{ }
+ };

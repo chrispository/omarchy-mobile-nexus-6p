@@ -434,3 +434,24 @@ image, so the phone comes back to Linux with SSH.
 - **qcom_fg's `Failed to register battery`** was a probe deferral (it
   registers on the retry); `dev_err_probe()` now keeps it quiet. Its
   `sram_requests=-1` warning came once, around that failed first probe.
+
+### 2026-10-18 (morning): vibrator driver probes (7.3.0-rc7-angler+)
+
+- **Haptics:** PMI8994's haptics block drives the LRA. The driver and DT
+  node come from the msm8996 mainline tree (Caleb Connolly, Yassine
+  Oudjana). Two changes on top: it also matches `qcom,pmi8994-haptics`
+  (mainline's `qcom,spmi-haptics` binding is the newer PMIH0108 block), and
+  an optional `qcom,vmax-mv` caps the drive voltage. The driver would go to
+  3.6 V at full magnitude, and angler's stock kernel uses 1.2 V (1.8 V
+  strong); the DT sets 1.8 V.
+- `modprobe qcom_spmi_haptics` probed: `input: spmi_haptics as
+  .../pmic@3:qcom,haptics@c000/input/input4`. Nothing has been played yet:
+  the module is blacklisted on the phone
+  (`/etc/modprobe.d/omamobile-haptics-bringup.conf`) until the attended
+  test below.
+
+| Step | Command (phone) | Expect / Pass | Stop | Risk |
+| --- | --- | --- | --- | --- |
+| H1 | `modprobe qcom_spmi_haptics; grep -A4 spmi_haptics /proc/bus/input/devices` | an `eventN` handler | no device | low |
+| H2 | `pacman -S linuxconsole` (with the proxy), then `fftest /dev/input/eventN`, effect 4 or 5 (rumble) | a short buzz; `dmesg` quiet | a buzz that doesn't stop: `rmmod qcom_spmi_haptics` | low (the human holds the phone) |
+| H3 | Pass: move the blacklist out (delete the bring-up file), and let the shell's feedback use it | the shell's haptic feedback works | | |

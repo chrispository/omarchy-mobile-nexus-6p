@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: chris <08a487@gmail.com>
+Date: Sun, 18 Oct 2026 08:36:43 -0600
+Subject: [PATCH 20/20] arm64: dts: qcom: msm8994-huawei-angler: Enable haptics
+
+The vibrator is an LRA on PMI8994's haptics block; use the stock
+kernel's waveform, play rate and brake pattern, and its 1.8 V for the
+strongest effect.
+---
+ .../boot/dts/qcom/msm8994-huawei-angler-rev-101.dts    | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts b/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts
+index d5980dd08..90c8ed5f7 100644
+--- a/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts
++++ b/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts
+@@ -435,3 +435,13 @@ &pmi8994_smbchg {
+ 	monitored-battery = <&battery>;
+ 	status = "okay";
+ };
++
++/* LRA settings of the stock kernel (huawei-haptics.dtsi, msm-pmi8994.dtsi) */
++&pmi8994_haptics {
++	qcom,wave-shape = <HAP_WAVE_SINE>;
++	qcom,wave-play-rate-us = <4255>;
++	qcom,vmax-mv = <1800>;
++	qcom,brake-pattern = [03 03 00 00];
++
++	status = "okay";
++};

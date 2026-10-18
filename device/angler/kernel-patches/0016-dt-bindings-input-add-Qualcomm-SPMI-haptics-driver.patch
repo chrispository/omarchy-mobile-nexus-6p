@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Caleb Connolly <caleb@connolly.tech>
+Date: Sat, 12 Jun 2021 13:30:54 +0100
+Subject: [PATCH 16/20] dt-bindings: input: add Qualcomm SPMI haptics driver
+
+Add bindings for qcom PMIC SPMI haptics driver.
+
+Signed-off-by: Caleb Connolly <caleb@connolly.tech>
+[Only the header: mainline already has a qcom,spmi-haptics binding for
+the newer PMIH0108 haptics block.]
+---
+ include/dt-bindings/input/qcom,spmi-haptics.h | 32 +++++++++++++++++++
+ 1 file changed, 32 insertions(+)
+ create mode 100644 include/dt-bindings/input/qcom,spmi-haptics.h
+
+diff --git a/include/dt-bindings/input/qcom,spmi-haptics.h b/include/dt-bindings/input/qcom,spmi-haptics.h
+new file mode 100644
+index 000000000..14a7e7d14
+--- /dev/null
++++ b/include/dt-bindings/input/qcom,spmi-haptics.h
+@@ -0,0 +1,32 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * This header provides constants for pmi8998 SPMI haptics options.
++ */
++
++#ifndef _DT_BINDINGS_QCOM_PMIC_SPMI_HAPTICS_
++#define _DT_BINDINGS_QCOM_PMIC_SPMI_HAPTICS_
++
++// Actuator types
++#define HAP_TYPE_LRA		0
++#define HAP_TYPE_ERM		1
++
++// LRA Wave type
++#define HAP_WAVE_SINE		0
++#define HAP_WAVE_SQUARE		1
++
++// Play modes
++#define HAP_PLAY_DIRECT		0
++#define HAP_PLAY_BUFFER		1
++#define HAP_PLAY_AUDIO		2
++#define HAP_PLAY_PWM		3
++
++#define HAP_PLAY_MAX		HAP_PLAY_PWM
++
++// Auto resonance type
++#define HAP_AUTO_RES_NONE	0
++#define HAP_AUTO_RES_ZXD	1
++#define HAP_AUTO_RES_QWD	2
++#define HAP_AUTO_RES_MAX_QWD	3
++#define HAP_AUTO_RES_ZXD_EOP	4
++
++#endif /* _DT_BINDINGS_QCOM_PMIC_SPMI_HAPTICS_ */
