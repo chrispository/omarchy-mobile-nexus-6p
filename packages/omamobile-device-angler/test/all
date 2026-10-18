@@ -29,6 +29,7 @@ pass "storage guard rules"
 for f in usr/bin/reboot-to usr/bin/fbkick usr/bin/omamobile-boot-ok \
          usr/lib/systemd/system/omamobile-boot-ok.service \
          usr/lib/systemd/system/multi-user.target.wants/omamobile-boot-ok.service \
+         usr/bin/omamobile-cpus usr/lib/systemd/system/multi-user.target.wants/omamobile-cpus.service \
          usr/lib/systemd/network/20-usb-gadget.network \
          usr/lib/NetworkManager/conf.d/10-omamobile-usb.conf \
          etc/ssh/sshd_config.d/10-omamobile-angler.conf; do

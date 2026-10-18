@@ -397,3 +397,19 @@ image, so the phone comes back to Linux with SSH.
   `boot`, which has no charger driver: flashing the charger-capable image
   there would make that recovery faster (needs the owner's approval).
 
+### 2026-10-18 (morning): four cores (7.3.0-rc7-angler+)
+
+- **CPU1-3 run.** After an hour charging (3.09 V at boot, 3.55 V half an
+  hour later at about 190 mA), with the arm64 hotplug patch: `modprobe
+  msm8994-cpu-boot`, then `echo 1 > cpuN/online` brought up each core
+  (`CPU1: Booted secondary processor 0x0000000001 [0x410fd032]`). The arch
+  timer and IPIs count on all four, and four pinned busy loops did the same
+  work each in parallel.
+- **At boot:** omamobile-device-angler 0.1.4 runs `omamobile-cpus.service`
+  before the boot is marked good, so a hang there still ends in the
+  initramfs dead-man. The next boot came up with `online: 0-3`.
+- **A57 cluster, read-only first:** L2 `PWR_CTL` (`0xf900f014`) 0x00109506
+  (off; the A53 L2 reads 0x90022218), clock mux (`0xf900f054`) 0 (XO), SAW
+  `VCTL` 0. The driver now turns on the rail (`0xb8`, angler's
+  `qcom,vctl-val`), powers up the L2 and selects GPLL0 (600 MHz) for the
+  cluster, for `cpus=0xf0`. Next: that test.

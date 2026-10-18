@@ -12,11 +12,17 @@ angler-03.78), with the reason for each. Plan and results:
 - **The kernel must end below 0x01e00000** (`0x8000` + Image header
   `image_size`, BSS included). The bootloader puts the DTB there, and a bigger
   kernel overwrites it and hangs on the Google logo. `build-n1` checks this.
-- **Only CPU0 comes up:** the stock TZ has no real PSCI (`CPU_ON` returns -22).
-  SMP needs lk2nd's spin table (kernel DT: a `spin-table@` reserved page).
-  lk2nd needs this phone's board id added (`lk2nd-patches/`); `fastboot boot
-  lk2nd.img` works, but our first kernel boot through it hung, with no
-  watchdog to reset it. Don't try it unattended.
+- **No PSCI:** the stock TZ's `CPU_ON` returns -22, and lk2nd has no msm8994
+  CPU power-up either. The kernel boots `maxcpus=1` with every CPU on
+  `spin-table` (release address in a reserved page at `0x062ff000`), and
+  `msm8994-cpu-boot.ko` sets the cores' boot address through SCM
+  (`SET_ADDR_MC`, SMC32) and powers them up with Google's downstream
+  sequence (`cpu_pwr_ctl.c`). An arm64 patch lets a CPU left offline at boot
+  be onlined later; `omamobile-cpus.service` does it. CPU1-3 (A53) work. The
+  A57 cluster also needs its rail (L2 SAW `VCTL`), its L2 and a clock: its
+  mux resets to XO.
+- **lk2nd** needs this phone's board id (`lk2nd-patches/`); `fastboot boot
+  lk2nd.img` works, but our kernel booted through it hung. Not needed now.
 - **The bootloader appends the serial number and Wi-Fi/BT MACs to the
   cmdline:** never commit `/proc/cmdline` or the top of `dmesg`.
 - **The container's `mkbootimg` is broken** (no `gki` module): use the host's.
