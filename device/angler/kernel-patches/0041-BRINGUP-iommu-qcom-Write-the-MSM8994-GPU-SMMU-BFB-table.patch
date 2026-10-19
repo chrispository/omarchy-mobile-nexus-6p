@@ -1,0 +1,131 @@
+Subject: [PATCH] BRINGUP: iommu/qcom: Write the MSM8994 GPU SMMU BFB table on resume
+
+The vendor kernel writes 27 implementation-defined TBU/prefetch (BFB)
+registers in the GPU SMMU's global space from the normal world, after
+the secure world has programmed the SMMU, on each first attach after
+power-up. Mainline writes none of them. With the context bank restored
+(0039) the first CP fetch at 0x1001000 still faults with FSR 0x40000004
+(access flag) and FSYNR0 0x583 (PTWF, level 3), while a CPU walk of the
+same tables finds the page, so the SMMU's own table walk goes wrong.
+
+Map the page at 0x2000 from the node's ranges and write the vendor
+msm8994 table on runtime resume, before the context banks, when the
+bfb parameter is set. Log each register's previous value.
+
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c	2026-10-18 18:00:57.501682408 -0600
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c	2026-10-18 18:02:19.562823302 -0600
+@@ -22,6 +22,7 @@
+ #include <linux/init.h>
+ #include <linux/mutex.h>
+ #include <linux/of.h>
++#include <linux/of_address.h>
+ #include <linux/of_clk.h>
+ #include <linux/of_platform.h>
+ #include <linux/of_reserved_mem.h>
+@@ -59,6 +60,33 @@
+ 
+ #define SMMU_INTR_SEL_NS     0x2000
+ 
++/*
++ * BRINGUP: the vendor kernel writes these implementation-defined TBU and
++ * prefetch (BFB) registers from the normal world after the secure world has
++ * programmed the SMMU, on every first attach after power-up. Values from
++ * the vendor msm8994-iommu.dtsi kgsl_iommu node.
++ */
++static bool bfb;
++module_param(bfb, bool, 0644);
++MODULE_PARM_DESC(bfb, "Write the MSM8994 GPU SMMU BFB table on resume");
++
++#define QCOM_IOMMU_BFB_BASE	0x2000
++#define QCOM_IOMMU_BFB_SIZE	0x1000
++
++static const u16 msm8994_gpu_bfb_regs[] = {
++	0x2000, 0x204c, 0x2060, 0x2514, 0x2540, 0x256c, 0x20ac, 0x215c,
++	0x220c, 0x22bc, 0x2314, 0x2394, 0x2414, 0x2494, 0x2008, 0x2600,
++	0x2604, 0x2608, 0x260c, 0x2610, 0x2614, 0x2618, 0x261c, 0x2620,
++	0x2624, 0x2628, 0x262c,
++};
++
++static const u32 msm8994_gpu_bfb_data[] = {
++	0x3, 0x3, 0x1555, 0x0, 0x0, 0x10, 0x0, 0x120,
++	0x120, 0x10, 0x0, 0x0, 0x0, 0x1, 0x0, 0x7,
++	0x0, 0x20, 0x20, 0x0c, 0x0, 0x0, 0x0, 0x10,
++	0x0, 0x0, 0x10,
++};
++
+ enum qcom_iommu_clk {
+ 	CLK_IFACE,
+ 	CLK_BUS,
+@@ -74,6 +102,7 @@
+ 	struct device		*dev;
+ 	struct clk_bulk_data clks[CLK_NUM];
+ 	void __iomem		*local_base;
++	void __iomem		*bfb_base;
+ 	u32			 sec_id;
+ 	u8			 max_asid;
+ 	bool			 sec_cfg_ready;
+@@ -1105,6 +1134,26 @@
+ 		return -ENODEV;
+ 	}
+ 
++	/* BRINGUP: the GPU SMMU's (secure id 18) global page with the BFB table */
++	if (of_device_is_compatible(dev->of_node, "qcom,msm8994-iommu") &&
++	    qcom_iommu->sec_id == 18) {
++		struct of_range_parser parser;
++		struct of_range range;
++
++		if (!of_range_parser_init(&parser, dev->of_node) &&
++		    of_pci_range_parser_one(&parser, &range) &&
++		    range.bus_addr == 0) {
++			phys_addr_t pa = range.cpu_addr + QCOM_IOMMU_BFB_BASE;
++
++			qcom_iommu->bfb_base = devm_ioremap(dev, pa,
++							    QCOM_IOMMU_BFB_SIZE);
++			if (!qcom_iommu->bfb_base)
++				return -ENOMEM;
++		}
++		dev_info(dev, "iommu bfb: table %s\n",
++			 qcom_iommu->bfb_base ? "mapped" : "not mapped");
++	}
++
+ 	platform_set_drvdata(pdev, qcom_iommu);
+ 
+ 	ret = devm_pm_runtime_enable(dev);
+@@ -1181,6 +1230,26 @@
+ 	iommu_device_unregister(&qcom_iommu->iommu);
+ }
+ 
++static void qcom_iommu_write_bfb(struct qcom_iommu_dev *qcom_iommu)
++{
++	void __iomem *base = qcom_iommu->bfb_base;
++	unsigned int i;
++
++	if (!bfb || !base)
++		return;
++
++	for (i = 0; i < ARRAY_SIZE(msm8994_gpu_bfb_regs); i++) {
++		unsigned int off = msm8994_gpu_bfb_regs[i] - QCOM_IOMMU_BFB_BASE;
++
++		dev_info(qcom_iommu->dev, "iommu bfb: 0x%04x 0x%08x -> 0x%08x\n",
++			 msm8994_gpu_bfb_regs[i], readl_relaxed(base + off),
++			 msm8994_gpu_bfb_data[i]);
++		writel_relaxed(msm8994_gpu_bfb_data[i], base + off);
++	}
++	/* The context banks are programmed after this */
++	wmb();
++}
++
+ static int __maybe_unused qcom_iommu_resume(struct device *dev)
+ {
+ 	struct qcom_iommu_dev *qcom_iommu = dev_get_drvdata(dev);
+@@ -1203,6 +1272,9 @@
+ 		}
+ 	}
+ 
++	if (qcom_iommu->sec_cfg_ready)
++		qcom_iommu_write_bfb(qcom_iommu);
++
+ 	/*
+ 	 * A context bank loses its programming when the SMMU's power domain
+ 	 * collapses, and the secure world restores only the global space.

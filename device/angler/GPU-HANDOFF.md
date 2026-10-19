@@ -43,11 +43,20 @@ With it the GPU reached `a4xx_hw_init`, loaded PM4/PFP, and the user bank
 faulted at IOVA `0x1001000` (the ringbuffer); the SoC then reset, most likely
 because the secured bank's handler on the shared SPI 241 read its `CB_FSR`.
 
-**Next action:** boot `angler-gpu-g6-irqfix.img` (0040: no IRQ handler on
-secured banks; the first faults' registers and the CPU's walk of the IOVA
-logged), read `/sys/kernel/debug/dri/1/gem` after `modprobe msm`, then run
-the same EGL/GBM test with `drm.debug=0x2`. The test binary is
-`/root/egl-gpu-test` on the phone. Same gate below.
+**0040 confirmed:** no reset. The fault is logged as FSR 0x40000004 (access
+flag fault) with FSYNR0 0x583 (PTWF, level 3), while the CPU's walk of the
+same tables finds the page; the GEM list shows the ring mapped at 0x1001000.
+The SMMU's own table walk goes wrong (GPU-PLAN Results).
+
+**0041 confirmed, G6 passes:** with `qcom_iommu.bfb=1` the walk works and
+Mesa renders on the A430 (`FD430`, GLES 3.0): clear and shader draw read
+back correctly, 11 of 11 runs, no faults (GPU-PLAN Results). The BFB
+registers reset with the GX GDSC, so 0041 writes them on every resume.
+
+**Next action:** make the BFB write unconditional for the msm8994 GPU SMMU
+(no parameter), then G7: Hyprland with simpledrm for scanout and msm for
+rendering. The test is `device/angler/tools/egl-gpu-test.c` (built on the
+phone as `/root/egl-gpu-test2`).
 
 The owner authorized the one-shot diagnostic boots that produced these
 results. Ask before any further boot, module push or persistent change.
@@ -96,7 +105,8 @@ All images live in `~/android/mainline/out-angler-gpu/`:
 | `angler-gpu-mm-power-secure3.img` | `ef34fc5e815ad4580687d9248f7962c93e7cd0fac0067ceceaec5de2967ea5d0` | Tested; pinpointed the v1-sec FSR reset |
 | `angler-gpu-mm-power-secure4.img` | `128c87f004f51f986bba5bbe451aa3c641a638a240fc484410841877fd921f72` | Tested; IOMMU registered, contexts up |
 | `angler-gpu-g5-0036.img` | `ffe59c03230cfcdd5185e8b7ca1a9a599ea1fc3c4cbaa436598b25ba27d95e57` | Tested; OCMEM stride oops |
-| `angler-gpu-g6-irqfix.img` | `724b83f2dafbb644e54c67c404d99103a55c2a9b9cda51754d6be1a765bc4861` | Built (0039+0040, full `W=1`); same DTB and cmdline; not booted |
+| `angler-gpu-g6-bfb.img` | `c54bf9a1ae2c34749850291ba6bef5ea8051ca904b91942c4db7329f21bd9c32` | Tested (0041, `bfb=1`): G6 passes, FD430 renders |
+| `angler-gpu-g6-irqfix.img` | `724b83f2dafbb644e54c67c404d99103a55c2a9b9cda51754d6be1a765bc4861` | Tested (0040): no reset; access flag fault at the ringbuffer logged |
 | `angler-gpu-g6-ctxrestore.img` | `104a304556cd6a07b33ad39cc3eeb2da5cbc5c526daa3ca186bad723144777a0` | Tested (0039): bank restored, then ringbuffer fault and reset |
 | `angler-gpu-g5-0038.img` | `fb06ca3ed0d50a8663eb8b2e622266e74a610627eac70f3c3682200ba1e47966` | Tested; `renderD128`, then G6 reset |
 | `angler-gpu-zero.img` | `9ccd3d2602f889d039a1b5927e015779a7a88fc602f43e3c55392f0fc2518450` | Superseded; reset in secure init |

@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Nexus 6P (angler) GPU plan: Adreno 430 on drm/msm
 
-**Status (2026-10-18, night): G1-G5 pass. G6: 0039 confirmed; the GPU now
-starts its CP and takes a context fault at the ringbuffer, then resets
-(likely the shared fault IRQ, fix 0040 built, not booted).** Kernel branch
+**Status (2026-10-18, night): G1-G6 pass. The A430 renders through Mesa
+(`FD430`, GLES 3.0) on `renderD128` with 0039-0041 and `qcom_iommu.bfb=1`;
+G7 (Hyprland on the render node) is next.** Kernel branch
 `omamobile-angler` in `~/android/mainline/linux-angler`, output
 `~/android/mainline/out-angler-gpu` (the RAM-root rollback stays in
 `out-angler-boot`). Goal: a render node (`/dev/dri/renderD128`) for the A430
@@ -113,6 +113,80 @@ limits; and making it the default (package version bump, the `mmcc` and
 `ocmem` blacklist lines go, `boot` flash with the owner's go).
 
 ## Results
+
+### 2026-10-18 night: G6 passes with the BFB table (0041)
+
+Owner-approved boot of `angler-gpu-g6-bfb.img` (0039-0041) on
+`7.3.0-rc7-angler-gpu`, battery 3.94 V, watchdog with `nowayout`, SSH kmsg
+(`angler-g6d-kmsg.log`) and netconsole live; `bfb=1` set before `register`.
+
+- **The BFB registers lose their values with the GX GDSC**, like the
+  context bank: every resume read the same reset values (0x2000 0x8, 0x2060
+  0x0, 0x2600 0x0, 0x2620 0x61, ...) before the vendor table went in, so
+  the write has to happen on each resume, as 0041 does.
+- **No context fault.** `a4xx_hw_init` loads PM4/PFP and the CP runs:
+  RBBM status 0x2 (`RBBM_AHB_ERROR`, once, right after init; msm clears it
+  without a message, to look at later), then CP ringbuffer interrupts
+  (0x00100000) as work retires, and the GPU suspends when idle.
+- **The old test was wrong:** Mesa's GBM platform has no pbuffer configs,
+  so `eglChooseConfig` for `EGL_PBUFFER_BIT` returned none. The new test
+  (`device/angler/tools/egl-gpu-test.c`) uses a surfaceless context and an
+  RGB565 FBO, clears and then draws a full-screen triangle with a shader:
+
+  ```
+  GL_RENDERER=FD430
+  GL_VERSION=OpenGL ES 3.0 Mesa 26.2.4-arch1.1
+  clear pixel=66,130,189,255 err=0x0
+  draw pixel=255,130,0,255 err=0x0
+  PASS: clear and draw on the render node
+  ```
+
+  10 of 10 further runs passed, each with a GPU suspend/resume between
+  them; no `fault:` line, no hangcheck.
+- **Next:** make 0041 unconditional for the msm8994 GPU SMMU (drop the
+  parameter, keep the table), look at the ACTLR bits and the AHB error,
+  then G7.
+
+### 2026-10-18 night: 0040 holds; the SMMU's own walk faults
+
+Owner-approved boot of `angler-gpu-g6-irqfix.img` (0039+0040) on
+`7.3.0-rc7-angler-gpu`, battery 3.94 V, watchdog active with `nowayout`,
+SSH kmsg (`angler-g6c-kmsg.log`) and netconsole live.
+
+- **No reset.** The context fault is now logged and the phone carries on:
+  the GPU suspends and resumes again afterwards, and each resume restores
+  the bank (`SCTLR 0x00000000 before restore`, `0x000010e7 restored`).
+  0040 is a real fix.
+- **The buffers are mapped.** `/sys/kernel/debug/dri/1/gem` after `modprobe
+  msm`: `memptrs` at 0x1000000 and `ring0` at 0x1001000, both `mapped`.
+- **The fault:**
+
+  ```
+  fault: fsr 0x40000004 fsynr0 0x583 far 0x1001000 cb 0: ttbr0 0x1e21e000
+         tcr 0x80802020 sctlr 0x10e7, cpu walk 0x22944000 (saved ttbr0 0x1e21e000)
+  ```
+
+  A second one follows at 0x1001040, then `a4xx_irq` status 0x2 and the GPU
+  suspends. FSR is SS plus AFF (access flag fault), not a translation
+  fault; FSYNR0 has PLVL 3, NSSTATE, NSATTR and PTWF (the fault happened
+  on a table walk). The bank's registers hold what 0039 saved, and the
+  CPU walk of the same tables finds the page, so the tables are right and
+  the SMMU's own walk goes wrong. io-pgtable always sets AF in a leaf, so
+  the walker is reading something other than our leaf (a table
+  descriptor, `0b11` without AF, would look like this) or a second stage
+  is involved.
+- **The `egl-gpu-test` itself** stops at `eglChooseConfig failed 0x3000
+  n=0` (a userspace issue to look at once the GPU runs).
+- **What mainline skips that the vendor kernel does:** on the first attach
+  after power-up the vendor `msm_iommu-v1.c` writes 27 implementation-
+  defined BFB (TBU/prefetch) registers at 0x2000-0x262c in the global
+  space from the normal world (table in the vendor `msm8994-iommu.dtsi`
+  `kgsl_iommu` node), and sets ACTLR BPRCISH/BPRCOSH/BPRCNSH on each
+  bank. 0041 writes the BFB table on every runtime resume, before the
+  banks, gated by `qcom_iommu.bfb=1` (runtime, 0644) so one image covers
+  both sides; it logs each register's value before the write. Image
+  `angler-gpu-g6-bfb.img` (sha256 `c54bf9a1...21bd9c32`). If the fault
+  stays, ACTLR is next.
 
 ### 2026-10-18 night: 0039 confirmed; the GPU runs into a fault, then the shared IRQ
 
