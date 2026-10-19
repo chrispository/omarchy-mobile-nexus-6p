@@ -1,9 +1,11 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Nexus 6P (angler) GPU plan: Adreno 430 on drm/msm
 
-**Status (2026-10-18, night): G1-G6 pass. The A430 renders through Mesa
-(`FD430`, GLES 3.0) on `renderD128` with 0039-0041 and `qcom_iommu.bfb=1`;
-G7 (Hyprland on the render node) is next.** Kernel branch
+**Status (2026-10-18, night): G1-G6 pass. G7 runs: Hyprland and the
+shell render on the A430 through Mesa's kmsro, stable with GPU runtime PM
+held on. A runtime suspend/resume of a GPU that never powered down froze
+the SoC twice (hw_init idle timeout, then a watchdog reset); the real fix
+is open.**  Kernel branch
 `omamobile-angler` in `~/android/mainline/linux-angler`, output
 `~/android/mainline/out-angler-gpu` (the RAM-root rollback stays in
 `out-angler-boot`). Goal: a render node (`/dev/dri/renderD128`) for the A430
@@ -113,6 +115,69 @@ limits; and making it the default (package version bump, the `mmcc` and
 `ocmem` blacklist lines go, `boot` flash with the owner's go).
 
 ## Results
+
+### 2026-10-18 night: G7 holds with GPU runtime PM off
+
+Owner-approved boots of `angler-gpu-g6-0042.img` with `msm-0043.ko` from
+`/tmp`, on `7.3.0-rc7-angler-gpu`. The render test passed both times.
+
+- **Run 1 (runtime PM as shipped, 66 ms autosuspend):** no AHB error and no
+  hangcheck this time. About 135 s in, a runtime suspend was followed by a
+  resume 0.3 ms later; the SMMU bank still read `SCTLR 0x10e7` before the
+  restore, so the GX domain had never collapsed. `a4xx_hw_init` then timed
+  out waiting for idle, and the SoC froze with no further message until the
+  5 s hardware watchdog reset it (netconsole and the kmsg stream both stop
+  at the timeout). The first try ended in the same `hw_init` timeout, so the
+  trigger is a re-init of a GPU that is still powered, not a shell job.
+- **Run 2, `echo on > /sys/bus/platform/devices/fdb00000.gpu/power/control`
+  right after `insmod`:** no suspend after that, no AHB error, no hangcheck
+  in 5 minutes with the session up; idle CPU 98.8%, the GPU at 27 MHz
+  (devfreq samples: 257 at 27 MHz, 7 at 150 MHz).
+- **Next:** find why the A430 can't be re-initialised while powered
+  (the GDSC not collapsing, or `hw_init` racing the CP's last work), then
+  drop the workaround. Until then a session needs runtime PM held on.
+
+### 2026-10-18 night: G7 first try, then a GPU lockup
+
+Owner-approved boot of `angler-gpu-g6-0042.img` (0042: the BFB table by
+default, ACTLR logged) with a test `msm.ko` loaded by hand from `/tmp`
+(`insmod`, the installed module untouched), on `7.3.0-rc7-angler-gpu`.
+
+- **The BFB default works:** `bfb` reads `Y`, and the EGL test passes
+  without setting anything.
+- **ACTLR needs nothing:** the bank reads `ACTLR 0x70000000` before every
+  restore, also after a power collapse: BPRCOSH/BPRCISH/BPRCNSH are the
+  hardware default, which is what the vendor kernel sets.
+- **The AHB error is not worth chasing with a status read:** a decoder
+  like a5xx's (read `RBBM_AHB_ERROR_STATUS` 0x18f, clear with `AHB_CMD`)
+  reported `READ addr=0x18F` dozens of times, so on the A430 reading that
+  register raises the error itself. Dropped; upstream's handler only
+  clears the interrupt. The one error per GPU init stays unexplained.
+- **The session renders on the GPU with no configuration.** Mesa 26.2
+  already uses freedreno through kmsro on simpledrm's `card0` (the EGL test
+  on `card0` reports `FD430`), so with `msm` loaded first `systemctl start
+  sddm` (SDDM stays disabled) brought Hyprland, Xwayland, quickshell and
+  the portal up as msm clients, about 780 GEM objects (900 MB). The lock
+  screen drew correctly (`grim`), and the CPU sat **97.7% idle** with the
+  shell up (llvmpipe kept a core busy before).
+- **Then the GPU locked up** about two minutes in: an `AHB bus error |
+  WRITE | addr=0x6004 | ports=0x0:0x1`, then `a4xx_hw_init` timed out
+  waiting for idle at the next resume and hangcheck fired (fences 88 of
+  91, offending task quickshell's `QSGRenderThread`). devfreq had moved
+  between 27 and 600 MHz by then.
+- **Recovery killed itself:** the crash-state capture read register
+  0x1000 (VMIDMT, secure-owned on 8994; `AHB bus error | READ |
+  addr=0x1000`) and took a synchronous external abort in
+  `adreno_gpu_state_get` (pc +0x204, x10 0x1001, x11 0x4004), killing the
+  GPU worker. Hangcheck then fired every second, stopping the session left
+  processes blocked, logind stopped opening sessions (SSH authenticates,
+  then waits), and the phone needed a long Power press.
+- **Fix 0043:** an A430 register list without the VMIDMT block, so
+  recovery can run. `msm-0043.ko` in `out-angler-gpu` (with the 0042
+  image). Next run: the same G7 with 0043, capture the devcoredump if it
+  hangs (`/sys/class/devcoredump/devcd*/data`), and log devfreq; if the
+  hangs follow the 600 MHz level, cap the GPU clock (VDD_GFX has no
+  consumer vote yet).
 
 ### 2026-10-18 night: G6 passes with the BFB table (0041)
 

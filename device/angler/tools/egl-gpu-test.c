@@ -6,6 +6,9 @@
  * reads both results back.
  *
  * Build on the phone: cc -O2 -o egl-gpu-test egl-gpu-test.c -lEGL -lGLESv2 -lgbm
+ * Usage: egl-gpu-test [device], default /dev/dri/renderD128. On simpledrm's
+ * card with MESA_LOADER_DRIVER_OVERRIDE=kmsro it tests freedreno through
+ * kmsro.
  */
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -56,7 +59,7 @@ static void readback(const char *what, unsigned char px[4])
 	       px[3], glGetError());
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
 	static const GLfloat tri[] = { -1, -1, 3, -1, -1, 3 };
 	PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display;
@@ -75,9 +78,11 @@ int main(void)
 	EGLConfig cfg;
 	int fd, pass;
 
-	fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
+	const char *path = argc > 1 ? argv[1] : "/dev/dri/renderD128";
+
+	fd = open(path, O_RDWR | O_CLOEXEC);
 	if (fd < 0) {
-		perror("open renderD128");
+		perror(path);
 		return 1;
 	}
 	gbm = gbm_create_device(fd);
