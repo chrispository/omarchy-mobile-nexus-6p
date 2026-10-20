@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+# Read-only 32-bit MMIO reads through /dev/mem, one register per line,
+# printed as it is read (a register that hangs the SoC is the last one shown).
+#
+# Usage (on the phone): mmio-read ADDR [ADDR...]   e.g. mmio-read 0xf9015000
+#   or from the laptop:  ssh ... 'python3 - 0xf9015000 0xf9015004' < mmio-read
+# Never writes. Only read blocks that are known powered and clocked.
+import mmap
+import os
+import struct
+import sys
+
+fd = os.open("/dev/mem", os.O_RDONLY | os.O_SYNC)
+for arg in sys.argv[1:]:
+    addr = int(arg, 0)
+    page = addr & ~(mmap.PAGESIZE - 1)
+    m = mmap.mmap(fd, mmap.PAGESIZE, mmap.MAP_SHARED, mmap.PROT_READ, offset=page)
+    val = struct.unpack_from("<I", m, addr - page)[0]
+    m.close()
+    print(f"{addr:#010x} {val:#010x}", flush=True)
+os.close(fd)

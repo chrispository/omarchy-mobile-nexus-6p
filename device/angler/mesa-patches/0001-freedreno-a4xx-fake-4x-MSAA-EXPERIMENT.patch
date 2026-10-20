@@ -1,0 +1,31 @@
+--- a/src/gallium/drivers/freedreno/a4xx/fd4_screen.c
++++ b/src/gallium/drivers/freedreno/a4xx/fd4_screen.c
+@@ -26,6 +26,15 @@
+ {
+    unsigned retval = 0;
+ 
++   /* EXPERIMENT (Omarchy Mobile): claim 4x MSAA on render targets and
++    * depth/stencil so ANGLE offers ES 3.0; resources are allocated
++    * single-sampled (fd_resource), so nothing is really antialiased.
++    */
++   if ((sample_count == 2 || sample_count == 4) &&
++       !(usage & ~(PIPE_BIND_RENDER_TARGET | PIPE_BIND_DEPTH_STENCIL |
++                   PIPE_BIND_SAMPLER_VIEW)) && target != PIPE_BUFFER)
++      sample_count = storage_sample_count = 1;
++
+    if ((target >= PIPE_MAX_TEXTURE_TYPES) ||
+        (sample_count > 1)) { /* TODO add MSAA */
+       DBG("not supported: format=%s, target=%d, sample_count=%d, usage=%x",
+--- a/src/gallium/drivers/freedreno/freedreno_resource.c
++++ b/src/gallium/drivers/freedreno/freedreno_resource.c
+@@ -1230,6 +1230,10 @@
+    struct pipe_resource *prsc = &rsc->b.b;
+    *prsc = *tmpl;
+ 
++   /* EXPERIMENT (Omarchy Mobile): fake MSAA on a4xx, see fd4_screen.c. */
++   if (is_a4xx(screen))
++      prsc->nr_samples = prsc->nr_storage_samples = 0;
++
+    pipe_reference_init(&prsc->reference, 1);
+    prsc->screen = pscreen;
+    rsc->hash = _mesa_hash_pointer(rsc);

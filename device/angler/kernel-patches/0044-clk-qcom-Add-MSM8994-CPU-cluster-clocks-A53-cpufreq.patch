@@ -1,0 +1,653 @@
+diff --git a/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts b/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts
+index f1c3f14bf..329999108 100644
+--- a/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts
++++ b/arch/arm64/boot/dts/qcom/msm8994-huawei-angler-rev-101.dts
+@@ -111,6 +111,22 @@ button-vol-up {
+ 	};
+ };
+ 
++&cpu0 {
++	cpu-supply = <&pm8994_s8>;
++};
++
++&cpu1 {
++	cpu-supply = <&pm8994_s8>;
++};
++
++&cpu2 {
++	cpu-supply = <&pm8994_s8>;
++};
++
++&cpu3 {
++	cpu-supply = <&pm8994_s8>;
++};
++
+ &pm8994_resin {
+ 	linux,code = <KEY_VOLUMEDOWN>;
+ 	status = "okay";
+@@ -457,6 +473,16 @@ &sdhc1 {
+ 	mmc-hs400-1_8v;
+ };
+ 
++/* VDD_APC0, the A53 cluster's rail: on SPMI directly (downstream: spm-regulator) */
++&pm8994_spmi_regulators {
++	pm8994_s8: s8 {
++		regulator-min-microvolt = <1000000>;
++		regulator-max-microvolt = <1180000>;
++		regulator-always-on;
++		regulator-boot-on;
++	};
++};
++
+ &pmi8994_fg {
+ 	monitored-battery = <&battery>;
+ 	status = "okay";
+diff --git a/arch/arm64/boot/dts/qcom/msm8994.dtsi b/arch/arm64/boot/dts/qcom/msm8994.dtsi
+index 6df9a1198..13ba65013 100644
+--- a/arch/arm64/boot/dts/qcom/msm8994.dtsi
++++ b/arch/arm64/boot/dts/qcom/msm8994.dtsi
+@@ -48,6 +48,8 @@ cpu0: cpu@0 {
+ 			compatible = "arm,cortex-a53";
+ 			reg = <0x0 0x0>;
+ 			enable-method = "psci";
++			clocks = <&cpu_clk 0>;
++			operating-points-v2 = <&cluster0_opp>;
+ 			next-level-cache = <&l2_0>;
+ 			l2_0: l2-cache {
+ 				compatible = "cache";
+@@ -61,6 +63,8 @@ cpu1: cpu@1 {
+ 			compatible = "arm,cortex-a53";
+ 			reg = <0x0 0x1>;
+ 			enable-method = "psci";
++			clocks = <&cpu_clk 0>;
++			operating-points-v2 = <&cluster0_opp>;
+ 			next-level-cache = <&l2_0>;
+ 		};
+ 
+@@ -69,6 +73,8 @@ cpu2: cpu@2 {
+ 			compatible = "arm,cortex-a53";
+ 			reg = <0x0 0x2>;
+ 			enable-method = "psci";
++			clocks = <&cpu_clk 0>;
++			operating-points-v2 = <&cluster0_opp>;
+ 			next-level-cache = <&l2_0>;
+ 		};
+ 
+@@ -77,6 +83,8 @@ cpu3: cpu@3 {
+ 			compatible = "arm,cortex-a53";
+ 			reg = <0x0 0x3>;
+ 			enable-method = "psci";
++			clocks = <&cpu_clk 0>;
++			operating-points-v2 = <&cluster0_opp>;
+ 			next-level-cache = <&l2_0>;
+ 		};
+ 
+@@ -85,6 +93,8 @@ cpu4: cpu@100 {
+ 			compatible = "arm,cortex-a57";
+ 			reg = <0x0 0x100>;
+ 			enable-method = "psci";
++			clocks = <&cpu_clk 1>;
++			operating-points-v2 = <&cluster1_opp>;
+ 			next-level-cache = <&l2_1>;
+ 			l2_1: l2-cache {
+ 				compatible = "cache";
+@@ -98,6 +108,8 @@ cpu5: cpu@101 {
+ 			compatible = "arm,cortex-a57";
+ 			reg = <0x0 0x101>;
+ 			enable-method = "psci";
++			clocks = <&cpu_clk 1>;
++			operating-points-v2 = <&cluster1_opp>;
+ 			next-level-cache = <&l2_1>;
+ 		};
+ 
+@@ -106,6 +118,8 @@ cpu6: cpu@102 {
+ 			compatible = "arm,cortex-a57";
+ 			reg = <0x0 0x102>;
+ 			enable-method = "psci";
++			clocks = <&cpu_clk 1>;
++			operating-points-v2 = <&cluster1_opp>;
+ 			next-level-cache = <&l2_1>;
+ 		};
+ 
+@@ -114,6 +128,8 @@ cpu7: cpu@103 {
+ 			compatible = "arm,cortex-a57";
+ 			reg = <0x0 0x103>;
+ 			enable-method = "psci";
++			clocks = <&cpu_clk 1>;
++			operating-points-v2 = <&cluster1_opp>;
+ 			next-level-cache = <&l2_1>;
+ 		};
+ 
+@@ -349,6 +365,85 @@ modem_smp2p_in: slave-kernel {
+ 		};
+ 	};
+ 
++	/*
++	 * A53 cluster: the downstream v2 frequency plan from 600 MHz up (fuse
++	 * corners 3 and 4, so the memory accelerator settings stay at their
++	 * boot value 0), at the cpr-regulator's per-corner voltage ceilings:
++	 * open loop, no CPR yet.
++	 */
++	cluster0_opp: opp-table-cluster0 {
++		compatible = "operating-points-v2";
++		opp-shared;
++
++		opp-600000000 {
++			opp-hz = /bits/ 64 <600000000>;
++			opp-microvolt = <1000000>;
++			clock-latency-ns = <300000>;
++		};
++
++		opp-672000000 {
++			opp-hz = /bits/ 64 <672000000>;
++			opp-microvolt = <1000000>;
++			clock-latency-ns = <300000>;
++		};
++
++		opp-768000000 {
++			opp-hz = /bits/ 64 <768000000>;
++			opp-microvolt = <1000000>;
++			clock-latency-ns = <300000>;
++		};
++
++		opp-864000000 {
++			opp-hz = /bits/ 64 <864000000>;
++			opp-microvolt = <1115000>;
++			clock-latency-ns = <300000>;
++		};
++
++		opp-960000000 {
++			opp-hz = /bits/ 64 <960000000>;
++			opp-microvolt = <1115000>;
++			clock-latency-ns = <300000>;
++		};
++
++		opp-1248000000 {
++			opp-hz = /bits/ 64 <1248000000>;
++			opp-microvolt = <1180000>;
++			clock-latency-ns = <300000>;
++		};
++
++		opp-1344000000 {
++			opp-hz = /bits/ 64 <1344000000>;
++			opp-microvolt = <1180000>;
++			clock-latency-ns = <300000>;
++		};
++
++		opp-1478400000 {
++			opp-hz = /bits/ 64 <1478400000>;
++			opp-microvolt = <1180000>;
++			clock-latency-ns = <300000>;
++		};
++
++		opp-1555200000 {
++			opp-hz = /bits/ 64 <1555200000>;
++			opp-microvolt = <1180000>;
++			clock-latency-ns = <300000>;
++		};
++	};
++
++	/*
++	 * A57 cluster: only the auxiliary 600 MHz that msm8994-cpu-boot sets,
++	 * until the cluster's PLL and rail are handled (angler CPU-PLAN C2).
++	 */
++	cluster1_opp: opp-table-cluster1 {
++		compatible = "operating-points-v2";
++		opp-shared;
++
++		opp-600000000 {
++			opp-hz = /bits/ 64 <600000000>;
++			clock-latency-ns = <300000>;
++		};
++	};
++
+ 	soc: soc@0 {
+ 		#address-cells = <1>;
+ 		#size-cells = <1>;
+@@ -369,6 +464,17 @@ apcs: mailbox@f900d000 {
+ 			#mbox-cells = <1>;
+ 		};
+ 
++		cpu_clk: clock-controller@f9015000 {
++			compatible = "qcom,msm8994-cpu-clk";
++			reg = <0xf9015000 0x1000>,
++			      <0xf9016000 0x1000>,
++			      <0xf900d000 0x1000>,
++			      <0xf900f000 0x1000>;
++			reg-names = "c0_pll", "c1_pll", "c0_mux", "c1_mux";
++			power-domains = <&rpmpd MSM8994_VDDMX_AO>;
++			#clock-cells = <1>;
++		};
++
+ 		watchdog@f9017000 {
+ 			compatible = "qcom,apss-wdt-msm8994", "qcom,kpss-wdt";
+ 			reg = <0xf9017000 0x1000>;
+diff --git a/drivers/clk/qcom/Kconfig b/drivers/clk/qcom/Kconfig
+index d1fc9bf87..ff609b9d7 100644
+--- a/drivers/clk/qcom/Kconfig
++++ b/drivers/clk/qcom/Kconfig
+@@ -365,6 +365,14 @@ config QCOM_CLK_APCS_MSM8916
+ 	  Say Y if you want to support CPU frequency scaling on devices
+ 	  such as msm8916.
+ 
++config QCOM_CLK_CPU_8994
++	tristate "MSM8994 CPU cluster clocks"
++	depends on ARM64 || COMPILE_TEST
++	depends on PM_GENERIC_DOMAINS
++	help
++	  Support for the A53 and A57 cluster clocks (PLLs and muxes) of
++	  MSM8994. Say Y or M to scale the CPU frequency with cpufreq-dt.
++
+ config QCOM_CLK_APCC_MSM8996
+ 	tristate "MSM8996 CPU Clock Controller"
+ 	select QCOM_KRYO_L2_ACCESSORS
+diff --git a/drivers/clk/qcom/Makefile b/drivers/clk/qcom/Makefile
+index daf25d583..7ae42cd9b 100644
+--- a/drivers/clk/qcom/Makefile
++++ b/drivers/clk/qcom/Makefile
+@@ -99,6 +99,7 @@ obj-$(CONFIG_MSM_MMCC_8998) += mmcc-msm8998.o
+ obj-$(CONFIG_QCOM_A53PLL) += a53-pll.o
+ obj-$(CONFIG_QCOM_A7PLL) += a7-pll.o
+ obj-$(CONFIG_QCOM_CLK_APCS_MSM8916) += apcs-msm8916.o
++obj-$(CONFIG_QCOM_CLK_CPU_8994) += clk-cpu-8994.o
+ obj-$(CONFIG_QCOM_CLK_APCC_MSM8996) += apcs-msm8996.o clk-cpu-8996.o clk-cbf-8996.o
+ obj-$(CONFIG_QCOM_CLK_APCS_SDX55) += apcs-sdx55.o
+ obj-$(CONFIG_QCOM_CLK_RPM) += clk-rpm.o
+diff --git a/drivers/clk/qcom/clk-cpu-8994.c b/drivers/clk/qcom/clk-cpu-8994.c
+new file mode 100644
+index 000000000..6226ca9c1
+--- /dev/null
++++ b/drivers/clk/qcom/clk-cpu-8994.c
+@@ -0,0 +1,392 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * CPU cluster clocks of MSM8994 v2.
++ *
++ * Each cluster (A53: CPU0-3, A57: CPU4-7) has a primary PLL whose VCO runs
++ * from 1209.6 to 1996.8 MHz in 19.2 MHz steps (L value only, no alpha), and a
++ * two-level mux in the cluster's APCS global block (offset 0x54):
++ *
++ *                     +------+
++ *   XO          ----->|0     |
++ *   PLL main/2,/4 --->|2  LF |----+         +------+
++ *   SYS_APCS_AUX ---->|3     |    +-------->|0     |
++ *   (GPLL0, 600 MHz)  +------+              |  HF  |-----> cluster clock
++ *   PLL early (VCO) ----------------------->|3     |
++ *                                           +------+
++ *
++ * Rates from 1209.6 MHz up run from the VCO directly; lower ones from the
++ * PLL's post-divided main output, and 600 MHz from the auxiliary clock. The
++ * PLL is relocked with the cluster parked on the auxiliary clock, as the
++ * downstream clock-cpu-8994.c and clock-pll.c (variable_rate_pll) do. The
++ * cluster's voltage and the MX corner are the cpufreq side's job, apart from
++ * one fixed MX vote taken here (see msm8994_cpu_clk_probe()).
++ *
++ * Bits 1-2 select the LF mux input, bits 3-4 the HF mux input. The PLL's
++ * post divider (USER_CTL bits 8-9: 0 = 1, 1 = 2, 3 = 4) may only change
++ * while the PLL is off.
++ */
++
++#include <linux/bitfield.h>
++#include <linux/clk-provider.h>
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/pm_domain.h>
++#include <linux/pm_runtime.h>
++#include <linux/spinlock.h>
++
++#define PLL_MODE		0x00
++#define PLL_L_VAL		0x04
++#define PLL_USER_CTL		0x10
++#define PLL_TEST_CTL_LO		0x20
++
++#define PLL_OUTCTRL		BIT(0)
++#define PLL_BYPASSNL		BIT(1)
++#define PLL_RESET_N		BIT(2)
++#define PLL_TEST_EN		BIT(3)
++#define PLL_MODE_MASK		GENMASK(3, 0)
++#define PLL_LOCKED		BIT(31)
++#define PLL_POST_DIV		GENMASK(9, 8)
++#define PLL_TEST_CTL_LO_VAL	0x80000000	/* v2, clock-cpu-8994.c */
++
++#define L2_PWR_CTL		0x14
++#define L2_PWR_ON		(BIT(9) | BIT(28))
++#define MUX_OFFSET		0x54
++#define MUX_LF			GENMASK(2, 1)
++#define MUX_HF			GENMASK(4, 3)
++#define LF_XO			0
++#define LF_PLL_MAIN		2
++#define LF_AUX			3
++#define HF_LF			0
++#define HF_PLL_EARLY		3
++
++#define XO_RATE			19200000UL
++#define AUX_RATE		600000000UL
++#define VCO_MIN			1209600000UL
++#define VCO_MAX			1996800000UL
++
++/* RPM corner for VDD_MX while the clusters scale: super turbo (rpmpd level 6) */
++#define MX_LEVEL_SUPER_TURBO	6
++
++struct msm8994_cpu_clk {
++	struct clk_hw hw;
++	void __iomem *pll;
++	void __iomem *mux;
++	struct device *dev;
++	bool fixed_aux;		/* A57 until CPU-PLAN C2: 600 MHz only */
++};
++
++static DEFINE_SPINLOCK(msm8994_cpu_clk_lock);
++
++static inline struct msm8994_cpu_clk *to_cpu_clk(struct clk_hw *hw)
++{
++	return container_of(hw, struct msm8994_cpu_clk, hw);
++}
++
++static void cpu_clk_set_mux(struct msm8994_cpu_clk *c, u32 mask, u32 sel)
++{
++	u32 val = readl_relaxed(c->mux + MUX_OFFSET);
++
++	val &= ~mask;
++	val |= (sel << __ffs(mask)) & mask;
++	writel_relaxed(val, c->mux + MUX_OFFSET);
++	/* The switch must complete before the old source goes away */
++	mb();
++	udelay(5);
++}
++
++/* The cluster's L2 power state lives in the same block as its mux */
++static bool cpu_clk_cluster_on(struct msm8994_cpu_clk *c)
++{
++	return (readl_relaxed(c->mux + L2_PWR_CTL) & L2_PWR_ON) == L2_PWR_ON;
++}
++
++static unsigned int cpu_clk_post_div(u32 user_ctl)
++{
++	switch (FIELD_GET(PLL_POST_DIV, user_ctl)) {
++	case 0:
++		return 1;
++	case 1:
++		return 2;
++	default:
++		return 4;
++	}
++}
++
++static unsigned long msm8994_cpu_clk_recalc_rate(struct clk_hw *hw,
++						 unsigned long parent_rate)
++{
++	struct msm8994_cpu_clk *c = to_cpu_clk(hw);
++	unsigned long vco;
++	u32 mux;
++
++	/* An unpowered cluster's PLL and mux must not be read */
++	if (!cpu_clk_cluster_on(c))
++		return 0;
++	mux = readl_relaxed(c->mux + MUX_OFFSET);
++	vco = readl_relaxed(c->pll + PLL_L_VAL) * XO_RATE;
++	if (FIELD_GET(MUX_HF, mux) == HF_PLL_EARLY)
++		return vco;
++	if (FIELD_GET(MUX_HF, mux) != HF_LF)
++		return 0;	/* the alternate PLL: never selected here */
++
++	switch (FIELD_GET(MUX_LF, mux)) {
++	case LF_XO:
++		return XO_RATE;
++	case LF_PLL_MAIN:
++		return vco / cpu_clk_post_div(readl_relaxed(c->pll + PLL_USER_CTL));
++	case LF_AUX:
++		return AUX_RATE;
++	default:
++		return 0;
++	}
++}
++
++/* The divider (1, 2 or 4) that puts @rate's VCO in range, or 0 */
++static unsigned int cpu_clk_pick_div(unsigned long rate)
++{
++	unsigned int div;
++
++	for (div = 1; div <= 4; div *= 2) {
++		unsigned long vco = rate * div;
++
++		if (vco >= VCO_MIN && vco <= VCO_MAX && !(vco % XO_RATE))
++			return div;
++	}
++	return 0;
++}
++
++static int msm8994_cpu_clk_determine_rate(struct clk_hw *hw,
++					  struct clk_rate_request *req)
++{
++	struct msm8994_cpu_clk *c = to_cpu_clk(hw);
++	unsigned long rate = req->rate;
++	unsigned int div;
++
++	if (rate == AUX_RATE)
++		return 0;
++	if (c->fixed_aux) {
++		req->rate = AUX_RATE;
++		return 0;
++	}
++	if (rate > VCO_MAX)
++		rate = VCO_MAX;
++	/* Round up to the next 19.2 MHz step of the VCO for each divider */
++	for (div = 1; div <= 4; div *= 2) {
++		unsigned long vco = roundup(rate * div, XO_RATE);
++
++		if (vco >= VCO_MIN && vco <= VCO_MAX) {
++			req->rate = vco / div;
++			return 0;
++		}
++	}
++	return -EINVAL;
++}
++
++static int cpu_clk_pll_lock(struct msm8994_cpu_clk *c)
++{
++	u32 mode, test;
++	int ret;
++
++	writel_relaxed(PLL_TEST_CTL_LO_VAL, c->pll + PLL_TEST_CTL_LO);
++	mode = readl_relaxed(c->pll + PLL_MODE) | PLL_TEST_EN;
++	writel_relaxed(mode, c->pll + PLL_MODE);
++	test = readl_relaxed(c->pll + PLL_TEST_CTL_LO);
++	writel_relaxed((test & ~GENMASK(7, 6)) | 0xc0, c->pll + PLL_TEST_CTL_LO);
++	mb();
++
++	mode |= PLL_BYPASSNL;
++	writel_relaxed(mode, c->pll + PLL_MODE);
++	mb();
++	udelay(10);
++
++	mode |= PLL_RESET_N;
++	writel_relaxed(mode, c->pll + PLL_MODE);
++	mb();
++	/* Wait out the early transient locks the downstream driver describes */
++	udelay(200);
++	writel_relaxed(0, c->pll + PLL_TEST_CTL_LO);
++
++	ret = readl_relaxed_poll_timeout_atomic(c->pll + PLL_MODE, mode,
++						mode & PLL_LOCKED, 1, 200);
++	if (!ret) {
++		udelay(1);
++		if (!(readl_relaxed(c->pll + PLL_MODE) & PLL_LOCKED))
++			ret = -ETIMEDOUT;
++	}
++	if (ret)
++		return ret;
++
++	mode = readl_relaxed(c->pll + PLL_MODE) | PLL_OUTCTRL;
++	writel_relaxed(mode, c->pll + PLL_MODE);
++	mb();
++	return 0;
++}
++
++static int msm8994_cpu_clk_set_rate(struct clk_hw *hw, unsigned long rate,
++				    unsigned long parent_rate)
++{
++	struct msm8994_cpu_clk *c = to_cpu_clk(hw);
++	unsigned long flags;
++	unsigned int div = 0;
++	u32 val;
++	int ret = 0;
++
++	if (!cpu_clk_cluster_on(c))
++		return -EBUSY;
++	if (c->fixed_aux && rate != AUX_RATE)
++		return -EINVAL;
++	if (rate != AUX_RATE) {
++		div = cpu_clk_pick_div(rate);
++		if (!div)
++			return -EINVAL;
++	}
++
++	spin_lock_irqsave(&msm8994_cpu_clk_lock, flags);
++
++	/* Park the cluster on the auxiliary clock: LF first, it may be unused */
++	cpu_clk_set_mux(c, MUX_LF, LF_AUX);
++	cpu_clk_set_mux(c, MUX_HF, HF_LF);
++	if (rate == AUX_RATE)
++		goto out;
++
++	/* Relock the PLL at the new VCO, with its post divider set while off */
++	val = readl_relaxed(c->pll + PLL_MODE) & ~PLL_MODE_MASK;
++	writel_relaxed(val, c->pll + PLL_MODE);
++	mb();
++	writel_relaxed(rate * div / XO_RATE, c->pll + PLL_L_VAL);
++	val = readl_relaxed(c->pll + PLL_USER_CTL) & ~PLL_POST_DIV;
++	val |= FIELD_PREP(PLL_POST_DIV, div == 4 ? 3 : 1);
++	writel_relaxed(val, c->pll + PLL_USER_CTL);
++	mb();
++
++	ret = cpu_clk_pll_lock(c);
++	if (ret)
++		goto out;	/* the cluster stays on the auxiliary clock */
++
++	if (div == 1) {
++		cpu_clk_set_mux(c, MUX_HF, HF_PLL_EARLY);
++	} else {
++		cpu_clk_set_mux(c, MUX_LF, LF_PLL_MAIN);
++		cpu_clk_set_mux(c, MUX_HF, HF_LF);
++	}
++out:
++	spin_unlock_irqrestore(&msm8994_cpu_clk_lock, flags);
++	if (ret)
++		dev_err(c->dev, "%s: PLL didn't lock for %lu Hz, left at %lu Hz\n",
++			clk_hw_get_name(hw), rate, AUX_RATE);
++	return ret;
++}
++
++static const struct clk_ops msm8994_cpu_clk_ops = {
++	.recalc_rate = msm8994_cpu_clk_recalc_rate,
++	.determine_rate = msm8994_cpu_clk_determine_rate,
++	.set_rate = msm8994_cpu_clk_set_rate,
++};
++
++static int msm8994_cpu_clk_probe(struct platform_device *pdev)
++{
++	static const char * const names[] = { "a53_clk", "a57_clk" };
++	struct device *dev = &pdev->dev;
++	struct clk_hw_onecell_data *data;
++	unsigned int i, nclk;
++	int ret;
++
++	nclk = ARRAY_SIZE(names);
++	data = devm_kzalloc(dev, struct_size(data, hws, ARRAY_SIZE(names)),
++			    GFP_KERNEL);
++	if (!data)
++		return -ENOMEM;
++	data->num = ARRAY_SIZE(names);
++
++	/*
++	 * VDD_MX must stay at or above the corner the clusters' voltage maps
++	 * to (super turbo at the top A53 rates, qcom,vdd-mx-corner-map of the
++	 * downstream cpr-regulator). Until the vote follows the rate, hold the
++	 * highest corner for as long as this driver is bound.
++	 */
++	if (dev->pm_domain) {
++		ret = devm_pm_runtime_enable(dev);
++		if (ret)
++			return ret;
++		ret = pm_runtime_resume_and_get(dev);
++		if (ret)
++			return dev_err_probe(dev, ret, "MX power domain\n");
++		ret = dev_pm_genpd_set_performance_state(dev, MX_LEVEL_SUPER_TURBO);
++		if (ret) {
++			pm_runtime_put(dev);
++			return dev_err_probe(dev, ret, "MX vote\n");
++		}
++	} else {
++		return dev_err_probe(dev, -ENODEV, "no MX power domain\n");
++	}
++
++	for (i = 0; i < nclk; i++) {
++		struct clk_init_data init = {
++			.name = names[i],
++			.ops = &msm8994_cpu_clk_ops,
++			.flags = CLK_GET_RATE_NOCACHE,
++		};
++		struct resource *pll, *mux;
++		struct msm8994_cpu_clk *c;
++
++		c = devm_kzalloc(dev, sizeof(*c), GFP_KERNEL);
++		if (!c)
++			return -ENOMEM;
++		c->dev = dev;
++		/*
++		 * The A57 cluster runs from the auxiliary clock as
++		 * msm8994-cpu-boot left it; its PLL, rail and memory
++		 * accelerator settings aren't handled yet (CPU-PLAN.md C2).
++		 */
++		c->fixed_aux = i == 1;
++		/*
++		 * Not devm_platform_ioremap_resource(): the mux registers sit in
++		 * the APCS global blocks, which the mailbox and the CPU boot code
++		 * also map.
++		 */
++		pll = platform_get_resource(pdev, IORESOURCE_MEM, i);
++		mux = platform_get_resource(pdev, IORESOURCE_MEM, 2 + i);
++		if (!pll || !mux)
++			return -EINVAL;
++		c->pll = devm_ioremap(dev, pll->start, resource_size(pll));
++		c->mux = devm_ioremap(dev, mux->start, resource_size(mux));
++		if (!c->pll || !c->mux)
++			return -ENOMEM;
++		c->hw.init = &init;
++		ret = devm_clk_hw_register(dev, &c->hw);
++		if (ret)
++			return ret;
++		data->hws[i] = &c->hw;
++		if (cpu_clk_cluster_on(c))
++			dev_info(dev, "%s at %lu Hz (mux %#x, PLL L %u)\n",
++				 names[i], clk_hw_get_rate(&c->hw),
++				 readl_relaxed(c->mux + MUX_OFFSET),
++				 readl_relaxed(c->pll + PLL_L_VAL));
++		else
++			dev_info(dev, "%s: cluster off\n", names[i]);
++	}
++	return devm_of_clk_add_hw_provider(dev, of_clk_hw_onecell_get, data);
++}
++
++static const struct of_device_id msm8994_cpu_clk_match[] = {
++	{ .compatible = "qcom,msm8994-cpu-clk" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, msm8994_cpu_clk_match);
++
++static struct platform_driver msm8994_cpu_clk_driver = {
++	.probe = msm8994_cpu_clk_probe,
++	.driver = {
++		.name = "msm8994-cpu-clk",
++		.of_match_table = msm8994_cpu_clk_match,
++		.suppress_bind_attrs = true,
++	},
++};
++module_platform_driver(msm8994_cpu_clk_driver);
++
++MODULE_DESCRIPTION("MSM8994 CPU cluster clocks");
++MODULE_LICENSE("GPL");
