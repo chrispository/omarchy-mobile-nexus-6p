@@ -1,3 +1,7 @@
+Proof of concept. Working on a 2015 Huawei Nexus 6P - but due to the lack of CPU/GPU resources - I would not recommend spending your time on this.
+
+## Original README below
+
 # Omarchy Mobile
 
 Native Omarchy on Google Pixel phones: Arch Linux ARM, Hyprland and Omarchy's own packages running directly on the phone with a mainline kernel, with Android apps in Waydroid as a later goal. First device: Pixel 7 Pro (cheetah, gs201).
